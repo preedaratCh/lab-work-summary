@@ -71,11 +71,14 @@ app.get('/static/:file', (c) => {
 
 app.get('/', (c) => {
   const today = localDate();
-  const month = monthOf(today);
+  // ?month=YYYY-MM ดูเดือนอื่นในปฏิทิน (ไม่ให้เลยเดือนปัจจุบัน)
+  const q = c.req.query('month') ?? '';
+  const month = MONTH_RE.test(q) && q <= monthOf(today) ? q : monthOf(today);
   return page(
     c,
     <HomePage
       today={today}
+      month={month}
       day={getDay(today)}
       days={listDays(`${month}-01`, `${month}-31`)}
       settingsReady={!!getSettings().targetPath}

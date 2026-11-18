@@ -1,7 +1,7 @@
 import type { Child, FC } from 'hono/jsx';
 import { LANGUAGES, type Settings, type TemplateRow, type TimesheetRow, type WorkDay } from './db';
 import type { GitDayData } from './git';
-import { daysInMonth, hoursBetween, parseLocal, timeOf, weekdayOf } from './time';
+import { daysInMonth, hoursBetween, parseLocal, shiftMonth, timeOf, weekdayOf } from './time';
 
 // ---------- icons (inline SVG, stroke = currentColor) ----------
 
@@ -24,6 +24,7 @@ const PATHS: Record<string, string> = {
   refresh: 'M20 11a8 8 0 0 0-14.9-3M4 4v4h4M4 13a8 8 0 0 0 14.9 3M20 20v-4h-4',
   alert: 'M12 8v5M12 16.5v.5M10.3 3.9L2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
   back: 'M15 6l-6 6 6 6',
+  next: 'M9 6l6 6-6 6',
   file: 'M6 3h9l4 4v14H6zM14 3v5h5',
   inbox: 'M3 13l3-8h12l3 8v6H3zM3 13h5l1 2h6l1-2h5',
   sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
@@ -294,8 +295,9 @@ const Timeline: FC<{ day?: WorkDay }> = ({ day }) => {
   );
 };
 
-export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; settingsReady: boolean; msg?: string }> = ({
+export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: WorkDay[]; settingsReady: boolean; msg?: string }> = ({
   today,
+  month,
   day,
   days,
   settingsReady,
@@ -304,8 +306,11 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
   const now = new Date();
   const working = !!day?.check_in_at && !day.check_out_at;
   const done = !!day?.check_out_at;
+  const isCurrent = month === today.slice(0, 7);
+  const monthLabel = fmtDate(`${month}-01`, { month: 'long', year: 'numeric' });
 
-  const worked = days.filter((d) => d.check_in_at);
+  // วันทำงาน = มีเวลาเข้างาน หรือมี work detail (เช่นวันที่ backfill ย้อนหลังซึ่งไม่มีเวลา)
+  const worked = days.filter((d) => d.check_in_at || (d.summary && d.summary_status === 'done'));
   const totalHours = worked.reduce((sum, d) => sum + (hoursBetween(d.check_in_at, d.check_out_at) ?? 0), 0);
   const fullDays = worked.filter((d) => d.check_out_at).length;
   const avg = fullDays ? totalHours / fullDays : 0;
@@ -412,10 +417,29 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
           </section>
         )}
 
-        <div class="grid-month">
+        <div class="grid-month" id="month">
           <section class="card">
             <div class="card-head">
-              <CardTitle icon="calendar" title={fmtDate(today, { month: 'long', year: 'numeric' })} sub="This month at a glance" />
+              <CardTitle icon="calendar" title={monthLabel} sub={isCurrent ? 'This month at a glance' : 'Month overview'} />
+              <div class="month-nav">
+                {!isCurrent && (
+                  <a class="btn ghost sm" href="/#month">
+                    This month
+                  </a>
+                )}
+                <a class="btn icon-btn" href={`/?month=${shiftMonth(month, -1)}#month`} title="Previous month" aria-label="Previous month">
+                  <Icon name="back" />
+                </a>
+                {isCurrent ? (
+                  <span class="btn icon-btn disabled" aria-hidden="true">
+                    <Icon name="next" />
+                  </span>
+                ) : (
+                  <a class="btn icon-btn" href={`/?month=${shiftMonth(month, 1)}#month`} title="Next month" aria-label="Next month">
+                    <Icon name="next" />
+                  </a>
+                )}
+              </div>
             </div>
             <div class="stats">
               <div class="stat">
@@ -437,12 +461,12 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
                 <div class="label">Avg per day</div>
               </div>
             </div>
-            <Calendar today={today} days={days} />
+            <Calendar today={today} month={month} days={days} />
           </section>
 
           <section class="card">
             <div class="card-head">
-              <CardTitle icon="clock" title="Recent days" />
+              <CardTitle icon="clock" title={isCurrent ? 'Recent days' : `Days in ${fmtDate(`${month}-01`, { month: 'long' })}`} />
               <form method="get" action="/day" class="row" style="gap:6px">
                 <input type="date" name="date" required aria-label="Pick a date" />
                 <button class="btn">Open</button>
@@ -450,12 +474,12 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
             </div>
             {days.length ? (
               <div class="days">
-                {days.slice(0, 7).map((d) => (
+                {(isCurrent ? days.slice(0, 7) : days).map((d) => (
                   <DayRow d={d} />
                 ))}
               </div>
             ) : (
-              <Empty icon="inbox">Nothing logged this month yet. Hit “Check in” to start.</Empty>
+              <Empty icon="inbox">{isCurrent ? 'Nothing logged this month yet. Hit “Check in” to start.' : `Nothing logged in ${monthLabel}.`}</Empty>
             )}
           </section>
         </div>
@@ -464,8 +488,7 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
   );
 };
 
-const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
-  const month = today.slice(0, 7);
+const Calendar: FC<{ today: string; month: string; days: WorkDay[] }> = ({ today, month, days }) => {
   const byDate = new Map(days.map((d) => [d.work_date, d]));
   const offset = parseLocal(`${month}-01 00:00:00`).getDay();
   const cells: Child[] = ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w) => <div class="wd">{w}</div>);
@@ -474,14 +497,23 @@ const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
     const date = `${month}-${pad(n)}`;
     const d = byDate.get(date);
     const h = d ? hoursBetween(d.check_in_at, d.check_out_at) : null;
-    const cls = [heatLevel(h), date === today ? 'is-today' : '', date > today ? 'future' : '', d?.summary_status === 'error' ? 'has-error' : '']
+    // มี work detail แต่ไม่มีเวลา (เช่น backfill) → แสดงจุดบอกว่ามีงาน
+    const workOnly = !h && !!d?.summary && d.summary_status === 'done';
+    const cls = [
+      heatLevel(h),
+      workOnly ? 'has-work' : '',
+      date === today ? 'is-today' : '',
+      date > today ? 'future' : '',
+      d?.summary_status === 'error' ? 'has-error' : '',
+    ]
       .filter(Boolean)
       .join(' ');
+    const label = fmtDate(date, { day: 'numeric', month: 'short' });
     cells.push(
       date > today ? (
         <span class={`cell ${cls}`}>{n}</span>
       ) : (
-        <a href={`/days/${date}`} class={cls} title={h ? `${fmtDate(date, { day: 'numeric', month: 'short' })} · ${h}h` : date}>
+        <a href={`/days/${date}`} class={cls} title={h ? `${label} · ${h}h` : workOnly ? `${label} · work logged, no hours` : label}>
           {n}
         </a>
       ),
@@ -491,6 +523,9 @@ const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
     <>
       <div class="cal">{cells}</div>
       <div class="legend">
+        <span class="legend-work">
+          <i class="dot-work"></i> Work, no hours
+        </span>
         Less <i></i>
         <i class="l1"></i>
         <i class="l2"></i>
@@ -500,6 +535,13 @@ const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
     </>
   );
 };
+
+/** งานแรกของ work detail: bullet แรก (ข้ามบรรทัดหัวข้อชื่อ repo) ถ้าไม่มี bullet ใช้บรรทัดแรกที่ไม่ใช่หัวข้อ */
+function previewLine(summary: string | null): string | undefined {
+  const lines = summary?.split('\n').map((l) => l.trim()) ?? [];
+  const bullet = lines.find((l) => /^[-*•]\s+/.test(l));
+  return (bullet ?? lines.find((l) => l && !l.startsWith('#')))?.replace(/^[-*•]\s+/, '');
+}
 
 const DayRow: FC<{ d: WorkDay }> = ({ d }) => {
   const h = hoursBetween(d.check_in_at, d.check_out_at);
@@ -516,7 +558,7 @@ const DayRow: FC<{ d: WorkDay }> = ({ d }) => {
           </span>
           <StatusBadge status={d.summary_status} />
         </div>
-        <div class="day-preview">{d.summary?.split('\n').find((l) => l.trim()) ?? <span class="muted">No summary yet</span>}</div>
+        <div class="day-preview">{previewLine(d.summary) ?? <span class="muted">No summary yet</span>}</div>
       </div>
       <div class="day-hours">
         {h !== null ? round1(h) : '–'}
