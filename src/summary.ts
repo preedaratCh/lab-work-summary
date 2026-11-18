@@ -36,7 +36,7 @@ async function run(date: string, recollect: boolean): Promise<void> {
 
     if (!hasWork(data)) {
       const why = data.warnings.length ? ` (${data.warnings.join('; ')})` : '';
-      finishSummary(date, `ไม่พบการเปลี่ยนแปลงใน git ของวันนี้${why}`);
+      finishSummary(date, `No git changes found for this day.${why}`);
       return;
     }
 

@@ -51,7 +51,7 @@ db.exec(`
 `);
 
 // งานที่ค้างสถานะ running ตอน server ปิดไป ถือว่าล้มเหลว (กดใหม่ได้)
-const INTERRUPTED = 'ถูกขัดจังหวะเพราะ server ปิดระหว่างทำงาน กดสั่งใหม่ได้';
+const INTERRUPTED = 'Interrupted because the server stopped while it was running. You can start it again.';
 db.prepare(`UPDATE work_days SET summary_status = 'error', summary_error = ? WHERE summary_status = 'running'`).run(INTERRUPTED);
 db.prepare(`UPDATE timesheets SET status = 'error', error = ? WHERE status = 'running'`).run(INTERRUPTED);
 
@@ -59,13 +59,23 @@ db.prepare(`UPDATE timesheets SET status = 'error', error = ? WHERE status = 'ru
 
 export type TargetType = 'single' | 'multi';
 
+/** ภาษาที่เลือกได้สำหรับ work detail / timesheet (ค่านี้ส่งให้ agent ตรง ๆ) */
+export const LANGUAGES = ['English', 'Thai'] as const;
+export type Language = (typeof LANGUAGES)[number];
+
+export function toLanguage(v: unknown): Language {
+  const s = String(v ?? '');
+  if ((LANGUAGES as readonly string[]).includes(s)) return s as Language;
+  return /ไทย|thai/i.test(s) ? 'Thai' : 'English'; // ค่าเก่าที่เคยพิมพ์เอง
+}
+
 export interface Settings {
   targetPath: string;
   targetType: TargetType;
   /** อีเมล git ของเจ้าของ ว่าง = ใช้ git config user.email ของแต่ละ repo */
   authorEmails: string[];
   /** ภาษาที่ให้ agent เขียน work detail / timesheet */
-  language: string;
+  language: Language;
   /** คำสั่งเรียก Claude Code CLI */
   claudeCommand: string;
 }
@@ -74,13 +84,14 @@ const DEFAULT_SETTINGS: Settings = {
   targetPath: '',
   targetType: 'multi',
   authorEmails: [],
-  language: 'ไทย',
+  language: 'Thai',
   claudeCommand: 'claude',
 };
 
 export function getSettings(): Settings {
   const row = db.prepare(`SELECT value FROM settings WHERE key = 'app'`).get() as { value: string } | undefined;
-  return { ...DEFAULT_SETTINGS, ...(row ? (JSON.parse(row.value) as Partial<Settings>) : {}) };
+  const s: Settings = { ...DEFAULT_SETTINGS, ...(row ? (JSON.parse(row.value) as Partial<Settings>) : {}) };
+  return { ...s, language: toLanguage(s.language) };
 }
 
 export function saveSettings(s: Settings): void {

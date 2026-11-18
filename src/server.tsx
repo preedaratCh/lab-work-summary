@@ -18,6 +18,7 @@ import {
   setTimes,
   TEMPLATE_DIR,
   TIMESHEET_DIR,
+  toLanguage,
   type Settings,
 } from './db';
 import { discoverRepos } from './git';
@@ -85,19 +86,19 @@ app.get('/', (c) => {
 
 app.post('/check-in', (c) => {
   const ok = checkIn(localDate(), localDateTime());
-  return back(c, '/', ok ? undefined : 'วันนี้กดเข้างานไปแล้ว');
+  return back(c, '/', ok ? undefined : 'You already checked in today');
 });
 
 app.post('/check-out', (c) => {
   const today = localDate();
-  if (!checkOut(today, localDateTime())) return back(c, '/', 'ยังไม่ได้เข้างาน หรือกดเลิกงานไปแล้ว');
+  if (!checkOut(today, localDateTime())) return back(c, '/', "You haven't checked in, or already checked out");
   startSummary(today, true);
   return back(c, '/');
 });
 
 app.get('/day', (c) => {
   const date = c.req.query('date') ?? '';
-  return DATE_RE.test(date) ? c.redirect(`/days/${date}`, 303) : back(c, '/', 'วันที่ไม่ถูกต้อง');
+  return DATE_RE.test(date) ? c.redirect(`/days/${date}`, 303) : back(c, '/', 'Invalid date');
 });
 
 // ---------- รายวัน ----------
@@ -126,11 +127,11 @@ app.post('/days/:date/times', async (c) => {
   };
   const inAt = toDateTime(body.check_in);
   const outAt = toDateTime(body.check_out);
-  if (inAt === false || outAt === false) return back(c, `/days/${date}`, 'รูปแบบเวลาไม่ถูกต้อง');
-  if (outAt && !inAt) return back(c, `/days/${date}`, 'ต้องมีเวลาเข้างานก่อนเวลาเลิกงาน');
-  if (inAt && outAt && outAt <= inAt) return back(c, `/days/${date}`, 'เวลาเลิกงานต้องหลังเวลาเข้างาน');
+  if (inAt === false || outAt === false) return back(c, `/days/${date}`, 'Invalid time format');
+  if (outAt && !inAt) return back(c, `/days/${date}`, 'Add a check-in time before the check-out time');
+  if (inAt && outAt && outAt <= inAt) return back(c, `/days/${date}`, 'Check-out must be after check-in');
   setTimes(date, inAt, outAt);
-  return back(c, `/days/${date}`, 'บันทึกเวลาแล้ว');
+  return back(c, `/days/${date}`, 'Hours saved');
 });
 
 app.post('/days/:date/summary', async (c) => {
@@ -138,7 +139,7 @@ app.post('/days/:date/summary', async (c) => {
   if (!date) return c.notFound();
   const body = await c.req.parseBody();
   setSummaryText(date, String(body.summary ?? '').trim());
-  return back(c, `/days/${date}`, 'บันทึก work detail แล้ว');
+  return back(c, `/days/${date}`, 'Work detail saved');
 });
 
 app.post('/days/:date/summarize', async (c) => {
@@ -146,7 +147,7 @@ app.post('/days/:date/summarize', async (c) => {
   if (!date) return c.notFound();
   const body = await c.req.parseBody();
   const started = startSummary(date, body.recollect === '1');
-  return back(c, `/days/${date}`, started ? undefined : 'กำลังสรุปอยู่แล้ว');
+  return back(c, `/days/${date}`, started ? undefined : 'A summary is already running');
 });
 
 // ---------- ตั้งค่า ----------
@@ -173,11 +174,11 @@ app.post('/settings', async (c) => {
       .split(/[,\s]+/)
       .map((e) => e.trim())
       .filter(Boolean),
-    language: String(body.language ?? '').trim() || 'ไทย',
+    language: toLanguage(body.language),
     claudeCommand: String(body.claudeCommand ?? '').trim() || 'claude',
   };
   saveSettings(s);
-  return back(c, body.test ? '/settings?test=1' : '/settings', 'บันทึกการตั้งค่าแล้ว');
+  return back(c, body.test ? '/settings?test=1' : '/settings', 'Settings saved');
 });
 
 // ---------- Timesheet ----------
@@ -194,9 +195,9 @@ app.get('/timesheet/list', (c) => fragment(c, <TimesheetList rows={listTimesheet
 app.post('/timesheet/template', async (c) => {
   const body = await c.req.parseBody();
   const file = body.file;
-  if (!(file instanceof File) || !file.size) return back(c, '/timesheet', 'กรุณาเลือกไฟล์');
-  if (!file.name.toLowerCase().endsWith('.xlsx')) return back(c, '/timesheet', 'รองรับเฉพาะไฟล์ .xlsx');
-  if (file.size > MAX_UPLOAD_BYTES) return back(c, '/timesheet', 'ไฟล์ใหญ่เกิน 10 MB');
+  if (!(file instanceof File) || !file.size) return back(c, '/timesheet', 'Please choose a file');
+  if (!file.name.toLowerCase().endsWith('.xlsx')) return back(c, '/timesheet', 'Only .xlsx files are supported');
+  if (file.size > MAX_UPLOAD_BYTES) return back(c, '/timesheet', 'File is larger than 10 MB');
 
   const storedName = `template-${Date.now()}.xlsx`;
   const dest = path.join(TEMPLATE_DIR, storedName);
@@ -205,18 +206,18 @@ app.post('/timesheet/template', async (c) => {
     await validateXlsx(dest);
   } catch (e) {
     fs.rmSync(dest, { force: true });
-    return back(c, '/timesheet', `เปิดไฟล์ไม่ได้: ${(e as Error).message}`);
+    return back(c, '/timesheet', `Couldn't open the file: ${(e as Error).message}`);
   }
   addTemplate(path.basename(file.name), storedName);
-  return back(c, '/timesheet', 'อัปโหลดไฟล์ต้นแบบแล้ว');
+  return back(c, '/timesheet', 'Template uploaded');
 });
 
 app.post('/timesheet/generate', async (c) => {
   const body = await c.req.parseBody();
   const month = String(body.month ?? '');
-  if (!MONTH_RE.test(month)) return back(c, '/timesheet', 'เดือนไม่ถูกต้อง');
+  if (!MONTH_RE.test(month)) return back(c, '/timesheet', 'Invalid month');
   const template = latestTemplate();
-  if (!template) return back(c, '/timesheet', 'ยังไม่มีไฟล์ต้นแบบ');
+  if (!template) return back(c, '/timesheet', 'Upload a template first');
   startTimesheet(month, template);
   return back(c, '/timesheet');
 });

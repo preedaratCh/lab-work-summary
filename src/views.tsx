@@ -1,5 +1,5 @@
 import type { Child, FC } from 'hono/jsx';
-import type { Settings, TemplateRow, TimesheetRow, WorkDay } from './db';
+import { LANGUAGES, type Settings, type TemplateRow, type TimesheetRow, type WorkDay } from './db';
 import type { GitDayData } from './git';
 import { daysInMonth, hoursBetween, parseLocal, timeOf, weekdayOf } from './time';
 
@@ -26,9 +26,13 @@ const PATHS: Record<string, string> = {
   back: 'M15 6l-6 6 6 6',
   file: 'M6 3h9l4 4v14H6zM14 3v5h5',
   inbox: 'M3 13l3-8h12l3 8v6H3zM3 13h5l1 2h6l1-2h5',
+  sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  moon: 'M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z',
+  monitor: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  bolt: 'M13 2L4 14h7l-1 8 9-12h-7z',
 };
 
-export const Icon: FC<{ name: keyof typeof PATHS | string; class?: string }> = ({ name, class: cls }) => (
+export const Icon: FC<{ name: string; class?: string }> = ({ name, class: cls }) => (
   <svg
     class={`icon ${cls ?? ''}`}
     viewBox="0 0 24 24"
@@ -47,17 +51,21 @@ export const Icon: FC<{ name: keyof typeof PATHS | string; class?: string }> = (
 
 type NavKey = 'home' | 'timesheet' | 'settings' | 'day';
 
+// set the saved theme before first paint so the page never flashes the wrong theme
+const THEME_BOOT = `try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}`;
+
 export const Layout: FC<{ title: string; msg?: string; active?: NavKey; children?: Child }> = ({ title, msg, active, children }) => (
-  <html lang="th">
+  <html lang="en">
     <head>
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>{title} · WorkingLab</title>
+      <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
       <link
         rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap"
       />
       <link rel="stylesheet" href="/static/app.css" />
       <script src="/static/htmx.min.js" defer></script>
@@ -68,14 +76,14 @@ export const Layout: FC<{ title: string; msg?: string; active?: NavKey; children
         <div class="top-inner">
           <a class="brand" href="/">
             <span class="brand-mark">
-              <Icon name="clock" />
+              <Icon name="bolt" />
             </span>
-            WorkingLab
+            <span class="brand-text">WorkingLab</span>
           </a>
-          <nav class="nav">
+          <nav class="seg nav" aria-label="Main">
             <a href="/" class={active === 'home' || active === 'day' ? 'active' : ''}>
               <Icon name="home" />
-              <span>หน้าหลัก</span>
+              <span>Today</span>
             </a>
             <a href="/timesheet" class={active === 'timesheet' ? 'active' : ''}>
               <Icon name="sheet" />
@@ -83,9 +91,20 @@ export const Layout: FC<{ title: string; msg?: string; active?: NavKey; children
             </a>
             <a href="/settings" class={active === 'settings' ? 'active' : ''}>
               <Icon name="gear" />
-              <span>ตั้งค่า</span>
+              <span>Settings</span>
             </a>
           </nav>
+          <div class="seg theme" role="group" aria-label="Theme">
+            <button type="button" data-theme-set="light" title="Light">
+              <Icon name="sun" />
+            </button>
+            <button type="button" data-theme-set="dark" title="Dark">
+              <Icon name="moon" />
+            </button>
+            <button type="button" data-theme-set="system" title="Match system">
+              <Icon name="monitor" />
+            </button>
+          </div>
         </div>
       </header>
       <main>{children}</main>
@@ -101,15 +120,18 @@ export const Layout: FC<{ title: string; msg?: string; active?: NavKey; children
 
 // ---------- helpers ----------
 
-const thaiDate = (date: string, opts: Intl.DateTimeFormatOptions) => parseLocal(`${date} 00:00:00`).toLocaleDateString('th-TH', opts);
-const isoLocal = (dt: string | null) => (dt ? dt.replace(' ', 'T') : undefined);
+const fmtDate = (date: string, opts: Intl.DateTimeFormatOptions) => parseLocal(`${date} 00:00:00`).toLocaleDateString('en-GB', opts);
+const LONG_DATE: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+const isoLocal = (dt: string | null | undefined) => (dt ? dt.replace(' ', 'T') : undefined);
+const pad = (n: number) => String(n).padStart(2, '0');
+const hourOf = (d: Date) => d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+const round1 = (n: number) => Math.round(n * 10) / 10;
 
-function elapsed(from: string | null, to: string | null): string {
+function elapsed(from: string | null | undefined, to: string | null | undefined): string {
   if (!from) return '0:00:00';
   const end = to ? parseLocal(to) : new Date();
   const ms = Math.max(0, end.getTime() - parseLocal(from).getTime());
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${Math.floor(ms / 3_600_000)}:${p(Math.floor((ms % 3_600_000) / 60_000))}:${p(Math.floor((ms % 60_000) / 1000))}`;
+  return `${Math.floor(ms / 3_600_000)}:${pad(Math.floor((ms % 3_600_000) / 60_000))}:${pad(Math.floor((ms % 60_000) / 1000))}`;
 }
 
 function heatLevel(h: number | null): string {
@@ -122,17 +144,17 @@ function heatLevel(h: number | null): string {
 
 function greeting(): string {
   const h = new Date().getHours();
-  if (h < 5) return 'ดึกแล้วนะ 🌙';
-  if (h < 12) return 'สวัสดีตอนเช้า ☀️';
-  if (h < 17) return 'สวัสดีตอนบ่าย 🌤️';
-  return 'สวัสดีตอนเย็น 🌆';
+  if (h < 5) return 'Burning the midnight oil';
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 const STATUS_TEXT: Record<WorkDay['summary_status'], string> = {
-  none: 'ยังไม่สรุป',
-  running: 'กำลังสรุป',
-  done: 'สรุปแล้ว',
-  error: 'สรุปไม่สำเร็จ',
+  none: 'Not summarized',
+  running: 'Summarizing',
+  done: 'Summarized',
+  error: 'Failed',
 };
 const STATUS_CLASS: Record<WorkDay['summary_status'], string> = { none: 'muted', running: 'warn', done: 'ok', error: 'error' };
 
@@ -140,21 +162,30 @@ const StatusBadge: FC<{ status: WorkDay['summary_status'] }> = ({ status }) => (
   <span class={`badge ${STATUS_CLASS[status]}`}>{STATUS_TEXT[status]}</span>
 );
 
-const CardTitle: FC<{ icon: string; title: string; sub?: string }> = ({ icon, title, sub }) => (
+const CardTitle: FC<{ icon: string; title: Child; sub?: string }> = ({ icon, title, sub }) => (
   <div class="card-title">
     <span class="icon-bubble">
       <Icon name={icon} />
     </span>
     <div>
       <h2>{title}</h2>
-      {sub && <div class="muted" style="font-size:.82rem">{sub}</div>}
+      {sub && <div class="card-sub">{sub}</div>}
     </div>
+  </div>
+);
+
+const Empty: FC<{ icon: string; children?: Child }> = ({ icon, children }) => (
+  <div class="empty">
+    <div class="empty-icon">
+      <Icon name={icon} />
+    </div>
+    {children}
   </div>
 );
 
 // ---------- work detail ----------
 
-/** กล่อง work detail; ถ้ากำลังสรุปอยู่ จะถาม server ซ้ำทุก 3 วินาทีจนเสร็จ */
+/** Work detail box; while summarizing it re-fetches itself every 3s until done */
 export const SummaryBox: FC<{ day: WorkDay }> = ({ day }) => {
   const running = day.summary_status === 'running';
   const poll = running ? { 'hx-get': `/days/${day.work_date}/summary-box`, 'hx-trigger': 'every 3s', 'hx-swap': 'outerHTML' } : {};
@@ -164,7 +195,7 @@ export const SummaryBox: FC<{ day: WorkDay }> = ({ day }) => {
         <>
           <div class="thinking">
             <span class="spinner"></span>
-            <span>agent กำลังอ่าน git และสรุปงานให้… (ประมาณ 1-2 นาที)</span>
+            <span>The agent is reading your git history and writing the summary… (about 1–2 min)</span>
           </div>
           {!day.summary && (
             <div class="skeleton">
@@ -178,9 +209,9 @@ export const SummaryBox: FC<{ day: WorkDay }> = ({ day }) => {
       )}
       {day.summary_status === 'error' && (
         <div class="alert error">
-          <Icon name="alert" class="error" />
+          <Icon name="alert" />
           <div>
-            <strong>สรุปไม่สำเร็จ</strong>
+            <strong>Summary failed</strong>
             <div>{day.summary_error}</div>
           </div>
         </div>
@@ -188,18 +219,80 @@ export const SummaryBox: FC<{ day: WorkDay }> = ({ day }) => {
       {day.summary ? (
         <pre class="work-detail">{day.summary}</pre>
       ) : (
-        !running && (
-          <div class="empty">
-            <Icon name="inbox" />
-            <div>ยังไม่มี work detail</div>
-          </div>
-        )
+        !running && <Empty icon="inbox">No work detail yet</Empty>
       )}
     </div>
   );
 };
 
 // ---------- home ----------
+
+/** Progress ring with 60 watch-style ticks */
+const Ring: FC = () => {
+  const ticks: Child[] = [];
+  for (let i = 0; i < 60; i++) {
+    const major = i % 5 === 0;
+    const a = (i / 60) * Math.PI * 2;
+    const r1 = major ? 101 : 103;
+    const r2 = 108;
+    ticks.push(
+      <line
+        class={major ? 'tick major' : 'tick'}
+        x1={(110 + r1 * Math.sin(a)).toFixed(2)}
+        y1={(110 - r1 * Math.cos(a)).toFixed(2)}
+        x2={(110 + r2 * Math.sin(a)).toFixed(2)}
+        y2={(110 - r2 * Math.cos(a)).toFixed(2)}
+      />,
+    );
+  }
+  return (
+    <svg class="ring" viewBox="0 0 220 220" aria-hidden="true">
+      <defs>
+        <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#6d5cff" />
+          <stop offset="55%" stop-color="#3b82f6" />
+          <stop offset="100%" stop-color="#06b6d4" />
+        </linearGradient>
+      </defs>
+      {ticks}
+      <circle class="track" cx="110" cy="110" r="92" />
+      <circle class="progress" cx="110" cy="110" r="92" />
+    </svg>
+  );
+};
+
+/** Horizontal bar of today's working hours with a "now" marker */
+const Timeline: FC<{ day?: WorkDay }> = ({ day }) => {
+  const now = new Date();
+  const start = day?.check_in_at ? parseLocal(day.check_in_at) : null;
+  const end = day?.check_out_at ? parseLocal(day.check_out_at) : now;
+  const from = Math.max(0, Math.min(7, start ? Math.floor(hourOf(start)) : 7));
+  let to = Math.min(24, Math.max(19, Math.ceil(hourOf(end)) + 1, Math.ceil(hourOf(now)) + 1));
+  const step = to - from > 12 ? 3 : 2;
+  to = Math.min(24, from + Math.ceil((to - from) / step) * step);
+  const labels: string[] = [];
+  for (let h = from; h <= to; h += step) labels.push(`${pad(h % 24)}:00`);
+  const pct = (d: Date) => Math.max(0, Math.min(100, ((hourOf(d) - from) / (to - from)) * 100));
+
+  return (
+    <div class="timeline" data-from={from} data-to={to}>
+      <div class="tl-track">
+        {start && (
+          <div
+            class={`tl-fill ${day?.check_out_at ? 'done' : ''}`}
+            style={`left:${pct(start)}%; width:${Math.max(0.8, pct(end) - pct(start))}%`}
+          ></div>
+        )}
+        {!day?.check_out_at && <div class="tl-now" style={`left:${pct(now)}%`}></div>}
+      </div>
+      <div class="tl-labels">
+        {labels.map((l) => (
+          <span>{l}</span>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; settingsReady: boolean; msg?: string }> = ({
   today,
@@ -209,7 +302,6 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
   msg,
 }) => {
   const now = new Date();
-  const p = (n: number) => String(n).padStart(2, '0');
   const working = !!day?.check_in_at && !day.check_out_at;
   const done = !!day?.check_out_at;
 
@@ -219,144 +311,154 @@ export const HomePage: FC<{ today: string; day?: WorkDay; days: WorkDay[]; setti
   const avg = fullDays ? totalHours / fullDays : 0;
 
   return (
-    <Layout title="หน้าหลัก" msg={msg} active="home">
+    <Layout title="Today" msg={msg} active="home">
       {!settingsReady && (
-        <div class="alert info">
+        <div class="alert info banner">
           <Icon name="folder" />
           <div>
-            ยังไม่ได้ตั้งค่า folder target ตอนเลิกงานจะสรุปงานจาก git ไม่ได้ <a href="/settings">ตั้งค่าตอนนี้ →</a>
+            No target folder set yet, so check-out can't summarize your git work. <a href="/settings">Set it up →</a>
           </div>
         </div>
       )}
 
-      <section class="card hero" data-checkin={isoLocal(day?.check_in_at ?? null)} data-checkout={isoLocal(day?.check_out_at ?? null)}>
-        <div style="position:relative; z-index:1">
-          <div class="greet">{greeting()}</div>
-          <div class="today">{thaiDate(today, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
-          <div class="clock" id="clock">
-            {p(now.getHours())}:{p(now.getMinutes())}
-            <span>:{p(now.getSeconds())}</span>
+      <div class="stack">
+        <section
+          class={`card hero ${working ? 'is-working' : ''}`}
+          data-checkin={isoLocal(day?.check_in_at)}
+          data-checkout={isoLocal(day?.check_out_at)}
+        >
+          <div>
+            <span class={`status-pill ${working ? 'working' : done ? 'done' : ''}`}>
+              <span class="dot"></span>
+              {working ? 'Working now' : done ? 'Done for today' : 'Not checked in'}
+            </span>
+            <div class="hero-date">
+              <span class="greet">{greeting()} · </span>
+              {fmtDate(today, LONG_DATE)}
+            </div>
+            <div class="clock" id="clock">
+              {pad(now.getHours())}:{pad(now.getMinutes())}
+              <span class="sec">{pad(now.getSeconds())}</span>
+            </div>
+            <div class="metrics">
+              <div class="metric">
+                <div class="label">
+                  <Icon name="play" /> In
+                </div>
+                <div class="value">{timeOf(day?.check_in_at) || '--:--'}</div>
+              </div>
+              <div class="metric">
+                <div class="label">
+                  <Icon name="stop" /> Out
+                </div>
+                <div class="value">{timeOf(day?.check_out_at) || '--:--'}</div>
+              </div>
+              <div class={`metric ${working ? 'live' : ''}`}>
+                <div class="label">
+                  <Icon name="clock" /> Worked
+                </div>
+                <div class="value" data-elapsed="">
+                  {elapsed(day?.check_in_at, day?.check_out_at)}
+                </div>
+              </div>
+            </div>
+            <Timeline day={day} />
           </div>
-          <div class="chips">
-            <div class="chip">
-              <div class="label">
-                <Icon name="play" /> เข้างาน
-              </div>
-              <div class="value">{timeOf(day?.check_in_at) || '--:--'}</div>
-            </div>
-            <div class="chip">
-              <div class="label">
-                <Icon name="stop" /> เลิกงาน
-              </div>
-              <div class="value">{timeOf(day?.check_out_at) || '--:--'}</div>
-            </div>
-            <div class={`chip ${working ? 'live' : ''}`}>
-              <div class="label">
-                {working ? <span class="dot"></span> : <Icon name="clock" />} {working ? 'กำลังทำงาน' : 'ทำงานไป'}
-              </div>
-              <div class="value" data-elapsed="">
-                {elapsed(day?.check_in_at ?? null, day?.check_out_at ?? null)}
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <div class="orb-zone">
-          <div class="orb-wrap">
-            <svg class="ring" viewBox="0 0 220 220" aria-hidden="true">
-              <defs>
-                <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stop-color="#6d4aff" />
-                  <stop offset="100%" stop-color="#0ea5e9" />
-                </linearGradient>
-              </defs>
-              <circle class="track" cx="110" cy="110" r="100" />
-              <circle class="progress" cx="110" cy="110" r="100" />
-            </svg>
-            {!day?.check_in_at && (
-              <form method="post" action="/check-in" class="orb-form">
-                <button class="orb orb-in">
-                  <Icon name="play" />
-                  <span class="orb-label">เข้างาน</span>
-                  <span class="orb-sub">เริ่มนับเวลา</span>
-                </button>
+          <div class="orb-zone">
+            <div class="orb-wrap">
+              <Ring />
+              {!day?.check_in_at && (
+                <form method="post" action="/check-in" class="orb-form">
+                  <span class="orb-halo in"></span>
+                  <button class="orb orb-in">
+                    <Icon name="play" />
+                    <span class="orb-label">Check in</span>
+                    <span class="orb-sub">Start the clock</span>
+                  </button>
+                </form>
+              )}
+              {working && (
+                <form method="post" action="/check-out" class="orb-form">
+                  <span class="orb-halo out" style="--c: rgba(244,63,94,.4)"></span>
+                  <button class="orb orb-out">
+                    <Icon name="stop" />
+                    <span class="orb-label">Check out</span>
+                    <span class="orb-sub">& summarize my day</span>
+                  </button>
+                </form>
+              )}
+              {done && (
+                <div class="orb orb-done">
+                  <Icon name="check" />
+                  <span class="orb-label">{round1(hoursBetween(day!.check_in_at, day!.check_out_at) ?? 0)}h</span>
+                  <span class="orb-sub">Nice work today</span>
+                </div>
+              )}
+              <span class="ring-caption">Ring fills at 8 hours</span>
+            </div>
+          </div>
+        </section>
+
+        {done && day && (
+          <section class="card">
+            <div class="card-head">
+              <CardTitle icon="sparkle" title="Today's work detail" sub="Summarized from git by the agent" />
+              <a class="btn" href={`/days/${today}`}>
+                <Icon name="edit" /> View & edit
+              </a>
+            </div>
+            <SummaryBox day={day} />
+          </section>
+        )}
+
+        <div class="grid-month">
+          <section class="card">
+            <div class="card-head">
+              <CardTitle icon="calendar" title={fmtDate(today, { month: 'long', year: 'numeric' })} sub="This month at a glance" />
+            </div>
+            <div class="stats">
+              <div class="stat">
+                <div class="value grad-text">{worked.length}</div>
+                <div class="label">Days worked</div>
+              </div>
+              <div class="stat">
+                <div class="value">
+                  {round1(totalHours)}
+                  <small>h</small>
+                </div>
+                <div class="label">Total hours</div>
+              </div>
+              <div class="stat">
+                <div class="value">
+                  {round1(avg)}
+                  <small>h</small>
+                </div>
+                <div class="label">Avg per day</div>
+              </div>
+            </div>
+            <Calendar today={today} days={days} />
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <CardTitle icon="clock" title="Recent days" />
+              <form method="get" action="/day" class="row" style="gap:6px">
+                <input type="date" name="date" required aria-label="Pick a date" />
+                <button class="btn">Open</button>
               </form>
-            )}
-            {working && (
-              <form method="post" action="/check-out" class="orb-form">
-                <button class="orb orb-out">
-                  <Icon name="stop" />
-                  <span class="orb-label">เลิกงาน</span>
-                  <span class="orb-sub">แล้วให้ agent สรุปงาน</span>
-                </button>
-              </form>
-            )}
-            {done && (
-              <div class="orb orb-done">
-                <Icon name="check" />
-                <span class="orb-label">เสร็จแล้ว</span>
-                <span class="orb-sub">{hoursBetween(day!.check_in_at, day!.check_out_at) ?? 0} ชม. วันนี้</span>
+            </div>
+            {days.length ? (
+              <div class="days">
+                {days.slice(0, 7).map((d) => (
+                  <DayRow d={d} />
+                ))}
               </div>
+            ) : (
+              <Empty icon="inbox">Nothing logged this month yet. Hit “Check in” to start.</Empty>
             )}
-          </div>
+          </section>
         </div>
-      </section>
-
-      {done && day && (
-        <section class="card">
-          <div class="card-head">
-            <CardTitle icon="sparkle" title="Work detail วันนี้" sub="สรุปจาก git โดย agent" />
-            <a class="btn ghost" href={`/days/${today}`}>
-              <Icon name="edit" /> ดู / แก้ไข
-            </a>
-          </div>
-          <SummaryBox day={day} />
-        </section>
-      )}
-
-      <div class="grid-2">
-        <section class="card">
-          <div class="card-head">
-            <CardTitle icon="calendar" title={thaiDate(today, { month: 'long', year: 'numeric' })} sub="ภาพรวมเดือนนี้" />
-          </div>
-          <div class="stats">
-            <div class="stat">
-              <div class="value grad-text">{worked.length}</div>
-              <div class="label">วันทำงาน</div>
-            </div>
-            <div class="stat">
-              <div class="value">{Math.round(totalHours * 10) / 10}</div>
-              <div class="label">ชั่วโมงรวม</div>
-            </div>
-            <div class="stat">
-              <div class="value">{Math.round(avg * 10) / 10}</div>
-              <div class="label">เฉลี่ย ชม./วัน</div>
-            </div>
-          </div>
-          <Calendar today={today} days={days} />
-        </section>
-
-        <section class="card">
-          <div class="card-head">
-            <CardTitle icon="clock" title="บันทึกล่าสุด" />
-            <form method="get" action="/day" class="row" style="gap:8px">
-              <input type="date" name="date" required aria-label="เลือกวันที่" />
-              <button class="btn">เปิด</button>
-            </form>
-          </div>
-          {days.length ? (
-            <div class="days">
-              {days.slice(0, 8).map((d) => (
-                <DayRow d={d} />
-              ))}
-            </div>
-          ) : (
-            <div class="empty">
-              <Icon name="inbox" />
-              <div>ยังไม่มีบันทึกในเดือนนี้ กด "เข้างาน" เพื่อเริ่ม</div>
-            </div>
-          )}
-        </section>
       </div>
     </Layout>
   );
@@ -366,10 +468,10 @@ const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
   const month = today.slice(0, 7);
   const byDate = new Map(days.map((d) => [d.work_date, d]));
   const offset = parseLocal(`${month}-01 00:00:00`).getDay();
-  const cells: Child[] = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((w) => <div class="wd">{w}</div>);
+  const cells: Child[] = ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w) => <div class="wd">{w}</div>);
   for (let i = 0; i < offset; i++) cells.push(<span></span>);
   for (let n = 1; n <= daysInMonth(month); n++) {
-    const date = `${month}-${String(n).padStart(2, '0')}`;
+    const date = `${month}-${pad(n)}`;
     const d = byDate.get(date);
     const h = d ? hoursBetween(d.check_in_at, d.check_out_at) : null;
     const cls = [heatLevel(h), date === today ? 'is-today' : '', date > today ? 'future' : '', d?.summary_status === 'error' ? 'has-error' : '']
@@ -379,7 +481,7 @@ const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
       date > today ? (
         <span class={`cell ${cls}`}>{n}</span>
       ) : (
-        <a href={`/days/${date}`} class={cls} title={h ? `${date} · ${h} ชม.` : date}>
+        <a href={`/days/${date}`} class={cls} title={h ? `${fmtDate(date, { day: 'numeric', month: 'short' })} · ${h}h` : date}>
           {n}
         </a>
       ),
@@ -389,11 +491,11 @@ const Calendar: FC<{ today: string; days: WorkDay[] }> = ({ today, days }) => {
     <>
       <div class="cal">{cells}</div>
       <div class="legend">
-        น้อย <i></i>
+        Less <i></i>
         <i class="l1"></i>
         <i class="l2"></i>
         <i class="l3"></i>
-        <i class="l4"></i> มาก
+        <i class="l4"></i> More
       </div>
     </>
   );
@@ -407,18 +509,18 @@ const DayRow: FC<{ d: WorkDay }> = ({ d }) => {
         <div class="d">{Number(d.work_date.slice(8))}</div>
         <div class="w">{weekdayOf(d.work_date)}</div>
       </div>
-      <div class="day-main">
+      <div style="min-width:0">
         <div class="day-times">
-          <span class="num">
+          <span>
             {timeOf(d.check_in_at) || '--:--'} → {timeOf(d.check_out_at) || '--:--'}
           </span>
           <StatusBadge status={d.summary_status} />
         </div>
-        <div class="day-preview">{d.summary?.split('\n').find((l) => l.trim()) ?? <span class="muted">—</span>}</div>
+        <div class="day-preview">{d.summary?.split('\n').find((l) => l.trim()) ?? <span class="muted">No summary yet</span>}</div>
       </div>
       <div class="day-hours">
-        {h ?? '–'}
-        <small>ชม.</small>
+        {h !== null ? round1(h) : '–'}
+        <small>hours</small>
       </div>
     </a>
   );
@@ -434,121 +536,123 @@ export const DayPage: FC<{ date: string; day?: WorkDay; msg?: string }> = ({ dat
   const totalFiles = git?.repos.reduce((s, r) => s + r.uncommitted.files.length, 0) ?? 0;
 
   return (
-    <Layout title={date} msg={msg} active="day">
+    <Layout title={fmtDate(date, { day: 'numeric', month: 'short', year: 'numeric' })} msg={msg} active="day">
       <div class="page-head">
         <div>
-          <a href="/" class="muted row" style="gap:4px; margin-bottom:6px">
-            <Icon name="back" /> กลับหน้าหลัก
+          <a href="/" class="back-link">
+            <Icon name="back" /> Back to today
           </a>
-          <h1>{thaiDate(date, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</h1>
+          <h1>{fmtDate(date, LONG_DATE)}</h1>
         </div>
         {day && <StatusBadge status={day.summary_status} />}
       </div>
 
-      <div class="grid-2">
-        <section class="card">
-          <div class="card-head">
-            <CardTitle icon="clock" title="เวลาเข้า-เลิกงาน" sub="แก้ได้ถ้าลืมกดหรือกดผิดเวลา" />
-          </div>
-          <form method="post" action={`/days/${date}/times`} class="time-inputs">
-            <label>
-              เข้างาน
-              <input type="time" name="check_in" value={timeOf(day?.check_in_at)} />
-            </label>
-            <label>
-              เลิกงาน
-              <input type="time" name="check_out" value={timeOf(day?.check_out_at)} />
-            </label>
-            <button class="btn">บันทึกเวลา</button>
-          </form>
-          <div class="stats" style="margin:20px 0 0">
-            <div class="stat">
-              <div class="value grad-text">{h ?? '–'}</div>
-              <div class="label">ชั่วโมง</div>
+      <div class="stack">
+        <div class="grid-2">
+          <section class="card">
+            <div class="card-head">
+              <CardTitle icon="clock" title="Hours" sub="Fix it here if you forgot to check in or out" />
             </div>
-            <div class="stat">
-              <div class="value">{git ? totalCommits : '–'}</div>
-              <div class="label">commits</div>
-            </div>
-            <div class="stat">
-              <div class="value">{git ? totalFiles : '–'}</div>
-              <div class="label">ไฟล์ค้าง</div>
-            </div>
-          </div>
-        </section>
-
-        <section class="card">
-          <div class="card-head">
-            <CardTitle icon="git" title="ข้อมูล git" sub={git ? `เก็บเมื่อ ${git.collectedAt.slice(11, 16)}` : 'ยังไม่ได้เก็บ'} />
-          </div>
-          {git ? (
-            <>
-              {git.warnings.map((w) => (
-                <div class="alert info">
-                  <Icon name="alert" /> <div>{w}</div>
+            <form method="post" action={`/days/${date}/times`} class="time-inputs">
+              <label>
+                Check in
+                <input type="time" name="check_in" value={timeOf(day?.check_in_at)} />
+              </label>
+              <label>
+                Check out
+                <input type="time" name="check_out" value={timeOf(day?.check_out_at)} />
+              </label>
+              <button class="btn">Save</button>
+            </form>
+            <div class="stats" style="margin:22px 0 0">
+              <div class="stat">
+                <div class="value grad-text">
+                  {h !== null ? round1(h) : '–'}
+                  {h !== null && <small>h</small>}
                 </div>
-              ))}
-              <ul class="repo-list">
-                {git.repos.map((r) => (
-                  <li>
-                    <Icon name="git" />
-                    <strong style="flex:1">{r.name}</strong>
-                    {r.error ? (
-                      <span class="badge error">error</span>
-                    ) : (
-                      <span class="muted num" style="font-size:.85rem">
-                        {r.commits.length} commits · {r.uncommitted.files.length} ไฟล์ค้าง
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-              <details style="margin-top:14px">
-                <summary>ดูข้อมูลดิบ</summary>
-                <pre class="raw">{JSON.stringify(git, null, 2)}</pre>
-              </details>
-            </>
-          ) : (
-            <div class="empty">
-              <Icon name="git" />
-              <div>ข้อมูลจะถูกเก็บตอนกดเลิกงาน หรือกด "เก็บ git ใหม่ + สรุป"</div>
+                <div class="label">Worked</div>
+              </div>
+              <div class="stat">
+                <div class="value">{git ? totalCommits : '–'}</div>
+                <div class="label">Commits</div>
+              </div>
+              <div class="stat">
+                <div class="value">{git ? totalFiles : '–'}</div>
+                <div class="label">Uncommitted files</div>
+              </div>
             </div>
-          )}
-        </section>
-      </div>
+          </section>
 
-      <section class="card">
-        <div class="card-head">
-          <CardTitle icon="sparkle" title="Work detail" sub="ใช้ตอน gen timesheet สิ้นเดือน" />
-          <div class="row" style="gap:8px">
-            {git && (
+          <section class="card">
+            <div class="card-head">
+              <CardTitle icon="git" title="Git activity" sub={git ? `Collected at ${git.collectedAt.slice(11, 16)}` : 'Not collected yet'} />
+            </div>
+            {git ? (
+              <>
+                {git.warnings.map((w) => (
+                  <div class="alert info">
+                    <Icon name="alert" /> <div>{w}</div>
+                  </div>
+                ))}
+                <ul class="repo-list">
+                  {git.repos.map((r) => (
+                    <li>
+                      <Icon name="git" />
+                      <strong style="flex:1">{r.name}</strong>
+                      {r.error ? (
+                        <span class="badge error" title={r.error}>
+                          error
+                        </span>
+                      ) : (
+                        <span class="muted" style="font-size:.82rem; white-space:nowrap">
+                          {r.commits.length} commits · {r.uncommitted.files.length} uncommitted
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <details style="margin-top:14px">
+                  <summary>Raw data</summary>
+                  <pre class="raw">{JSON.stringify(git, null, 2)}</pre>
+                </details>
+              </>
+            ) : (
+              <Empty icon="git">Collected when you check out, or when you press “Re-scan git & summarize”.</Empty>
+            )}
+          </section>
+        </div>
+
+        <section class="card">
+          <div class="card-head">
+            <CardTitle icon="sparkle" title="Work detail" sub="Used to fill your timesheet at the end of the month" />
+            <div class="row" style="gap:8px">
+              {git && (
+                <form method="post" action={`/days/${date}/summarize`}>
+                  <button class="btn" disabled={running} title="Use when the agent failed, e.g. you hit your usage limit">
+                    <Icon name="refresh" /> Retry with saved git data
+                  </button>
+                </form>
+              )}
               <form method="post" action={`/days/${date}/summarize`}>
-                <button class="btn" disabled={running} title="ใช้กรณี agent สรุปไม่สำเร็จ เช่นโควตาหมด">
-                  <Icon name="refresh" /> สรุปใหม่ (git เดิม)
+                <input type="hidden" name="recollect" value="1" />
+                <button class="btn primary" disabled={running}>
+                  <Icon name="sparkle" /> Re-scan git & summarize
                 </button>
               </form>
-            )}
-            <form method="post" action={`/days/${date}/summarize`}>
-              <input type="hidden" name="recollect" value="1" />
-              <button class="btn primary" disabled={running}>
-                <Icon name="sparkle" /> เก็บ git ใหม่ + สรุป
+            </div>
+          </div>
+          <SummaryBox day={day ?? emptyDay(date)} />
+          <details style="margin-top:20px">
+            <summary>Edit work detail manually</summary>
+            <form method="post" action={`/days/${date}/summary`} style="margin-top:12px">
+              <textarea name="summary">{day?.summary ?? ''}</textarea>
+              <button class="btn" style="margin-top:10px">
+                Save work detail
               </button>
             </form>
-          </div>
-        </div>
-        <SummaryBox day={day ?? emptyDay(date)} />
-        <details style="margin-top:18px">
-          <summary>
-            <Icon name="edit" /> แก้ไข work detail เอง
-          </summary>
-          <form method="post" action={`/days/${date}/summary`} style="margin-top:12px">
-            <textarea name="summary">{day?.summary ?? ''}</textarea>
-            <button class="btn" style="margin-top:10px">
-              บันทึก work detail
-            </button>
-          </form>
-        </details>
-      </section>
+          </details>
+        </section>
+      </div>
     </Layout>
   );
 };
@@ -569,25 +673,25 @@ function emptyDay(date: string): WorkDay {
 // ---------- settings ----------
 
 export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: string }; msg?: string }> = ({ s, test, msg }) => (
-  <Layout title="ตั้งค่า" msg={msg} active="settings">
+  <Layout title="Settings" msg={msg} active="settings">
     <div class="page-head">
       <div>
         <div class="eyebrow">Settings</div>
-        <h1>ตั้งค่า</h1>
+        <h1>Configure WorkingLab</h1>
       </div>
     </div>
 
-    <form method="post" action="/settings">
+    <form method="post" action="/settings" class="stack">
       <section class="card">
         <div class="card-head">
-          <CardTitle icon="folder" title="Folder target" sub="ที่ที่ระบบจะไปดูว่าวันนี้คุณแก้อะไรใน git" />
+          <CardTitle icon="folder" title="Target folder" sub="Where WorkingLab looks for what you changed in git" />
         </div>
         <label class="field">
           <span class="field-label">Path</span>
-          <input type="text" name="targetPath" value={s.targetPath} placeholder="เช่น D:\projects" />
+          <input type="text" name="targetPath" value={s.targetPath} placeholder="e.g. D:\projects" />
         </label>
         <div class="field">
-          <span class="field-label">ประเภท</span>
+          <span class="field-label">Folder type</span>
           <div class="options">
             <label class="option">
               <input type="radio" name="targetType" value="single" checked={s.targetType === 'single'} />
@@ -596,8 +700,9 @@ export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: 
               </span>
               <span>
                 <strong>Single repo</strong>
-                <small>folder นี้คือ git repo เดียว</small>
+                <small>The folder itself is one git repository</small>
               </span>
+              <span class="check"></span>
             </label>
             <label class="option">
               <input type="radio" name="targetType" value="multi" checked={s.targetType === 'multi'} />
@@ -605,62 +710,78 @@ export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: 
                 <Icon name="folders" />
               </span>
               <span>
-                <strong>Multi repo</strong>
-                <small>ข้างในมีหลาย repo (สแกน folder ย่อยชั้นแรก)</small>
+                <strong>Multiple repos</strong>
+                <small>Scan each repository one level inside</small>
               </span>
+              <span class="check"></span>
             </label>
           </div>
         </div>
-        <label class="field" style="margin-bottom:0">
-          <span class="field-label">อีเมล git ของคุณ</span>
+        <label class="field">
+          <span class="field-label">Your git email(s)</span>
           <input type="text" name="authorEmails" value={s.authorEmails.join(', ')} placeholder="me@work.com, me@gmail.com" />
-          <div class="hint">ใช้กรองว่า commit ไหนเป็นของคุณ ใส่ได้หลายอีเมลคั่นด้วย , (เว้นว่าง = ใช้ git config user.email ของแต่ละ repo)</div>
+          <div class="hint">Used to tell which commits are yours. Separate several with commas. Leave empty to use each repo's git config user.email.</div>
         </label>
       </section>
 
       <section class="card">
         <div class="card-head">
-          <CardTitle icon="sparkle" title="Agent" sub="Claude Code CLI ที่ใช้สรุปงานและกรอก timesheet" />
+          <CardTitle icon="sparkle" title="Agent" sub="Claude Code CLI writes your work details and fills timesheets" />
+        </div>
+        <div class="field">
+          <span class="field-label">Language for work details & timesheets</span>
+          <div class="options">
+            {LANGUAGES.map((lang) => (
+              <label class="option">
+                <input type="radio" name="language" value={lang} checked={s.language === lang} />
+                <span class="icon-bubble lang-flag">{lang === 'English' ? 'EN' : 'TH'}</span>
+                <span>
+                  <strong>{lang}</strong>
+                  <small>{lang === 'English' ? 'Summaries & timesheet in English' : 'Summaries & timesheet in Thai'}</small>
+                </span>
+                <span class="check"></span>
+              </label>
+            ))}
+          </div>
         </div>
         <label class="field">
-          <span class="field-label">ภาษาของ work detail / timesheet</span>
-          <input type="text" name="language" value={s.language} placeholder="ไทย หรือ English" />
-        </label>
-        <label class="field" style="margin-bottom:0">
-          <span class="field-label">คำสั่ง Claude Code CLI</span>
-          <input type="text" name="claudeCommand" value={s.claudeCommand} />
-          <div class="hint">ปกติคือ claude ถ้าเรียกไม่เจอ ให้ใส่ path เต็มของไฟล์ claude</div>
+          <span class="field-label">Claude Code CLI command</span>
+          <input type="text" name="claudeCommand" value={s.claudeCommand} class="mono" />
+          <div class="hint">Usually just claude. If it can't be found, enter the full path to the claude executable.</div>
         </label>
       </section>
 
-      <div class="row" style="margin-bottom:20px">
-        <button class="btn primary">บันทึก</button>
+      <div class="row">
+        <button class="btn primary">Save settings</button>
         <button class="btn" name="test" value="1">
-          <Icon name="refresh" /> บันทึก + ทดสอบหา repo
+          <Icon name="refresh" /> Save & find repos
         </button>
       </div>
     </form>
 
     {test && (
-      <section class="card">
+      <section class="card" style="margin-top:20px">
         <div class="card-head">
-          <CardTitle icon="git" title="ผลทดสอบ" />
-          {test.repos && <span class={`badge ${test.repos.length ? 'ok' : 'warn'}`}>พบ {test.repos.length} repo</span>}
+          <CardTitle icon="git" title="Repositories found" />
+          {test.repos && <span class={`badge ${test.repos.length ? 'ok' : 'warn'}`}>{test.repos.length} found</span>}
         </div>
         {test.error && (
           <div class="alert error">
-            <Icon name="alert" class="error" /> <div>{test.error}</div>
+            <Icon name="alert" /> <div>{test.error}</div>
           </div>
         )}
-        {test.repos && test.repos.length > 0 && (
-          <ul class="repo-list">
-            {test.repos.map((r) => (
-              <li>
-                <Icon name="git" /> {r}
-              </li>
-            ))}
-          </ul>
-        )}
+        {test.repos &&
+          (test.repos.length ? (
+            <ul class="repo-list">
+              {test.repos.map((r) => (
+                <li>
+                  <Icon name="git" /> <span class="mono">{r}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Empty icon="git">No git repositories found in this folder.</Empty>
+          ))}
       </section>
     )}
   </Layout>
@@ -669,9 +790,9 @@ export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: 
 // ---------- timesheet ----------
 
 const TS_STATUS: Record<TimesheetRow['status'], [string, string]> = {
-  running: ['กำลังสร้าง', 'warn'],
-  done: ['เสร็จแล้ว', 'ok'],
-  error: ['ไม่สำเร็จ', 'error'],
+  running: ['Generating', 'warn'],
+  done: ['Ready', 'ok'],
+  error: ['Failed', 'error'],
 };
 
 export const TimesheetList: FC<{ rows: TimesheetRow[] }> = ({ rows }) => {
@@ -683,10 +804,10 @@ export const TimesheetList: FC<{ rows: TimesheetRow[] }> = ({ rows }) => {
           <table>
             <thead>
               <tr>
-                <th>เดือน</th>
-                <th>ต้นแบบ</th>
-                <th>สร้างเมื่อ</th>
-                <th>สถานะ</th>
+                <th>Month</th>
+                <th>Template</th>
+                <th>Created</th>
+                <th>Status</th>
                 <th></th>
               </tr>
             </thead>
@@ -694,14 +815,14 @@ export const TimesheetList: FC<{ rows: TimesheetRow[] }> = ({ rows }) => {
               {rows.map((r) => (
                 <tr>
                   <td class="num">
-                    <strong>{r.month}</strong>
+                    <strong>{fmtDate(`${r.month}-01`, { month: 'short', year: 'numeric' })}</strong>
                   </td>
                   <td>{r.template_name}</td>
                   <td class="num muted">{r.created_at.slice(0, 16)}</td>
                   <td>
                     <span class={`badge ${TS_STATUS[r.status][1]}`}>{TS_STATUS[r.status][0]}</span>
                     {r.error && (
-                      <div class="error" style="font-size:.82rem; margin-top:4px">
+                      <div class="error" style="font-size:.8rem; margin-top:4px; max-width:360px">
                         {r.error}
                       </div>
                     )}
@@ -709,7 +830,7 @@ export const TimesheetList: FC<{ rows: TimesheetRow[] }> = ({ rows }) => {
                   <td style="text-align:right">
                     {r.status === 'done' && (
                       <a class="btn" href={`/timesheet/${r.id}/download`}>
-                        <Icon name="download" /> ดาวน์โหลด
+                        <Icon name="download" /> Download
                       </a>
                     )}
                   </td>
@@ -719,10 +840,7 @@ export const TimesheetList: FC<{ rows: TimesheetRow[] }> = ({ rows }) => {
           </table>
         </div>
       ) : (
-        <div class="empty">
-          <Icon name="sheet" />
-          <div>ยังไม่เคยสร้าง timesheet</div>
-        </div>
+        <Empty icon="sheet">No timesheets yet</Empty>
       )}
     </div>
   );
@@ -738,57 +856,77 @@ export const TimesheetPage: FC<{ template?: TemplateRow; month: string; rows: Ti
     <div class="page-head">
       <div>
         <div class="eyebrow">Timesheet</div>
-        <h1>สร้าง timesheet สิ้นเดือน</h1>
+        <h1>Month-end timesheet</h1>
       </div>
     </div>
 
-    <div class="grid-2">
-      <section class="card">
-        <div class="card-head">
-          <CardTitle icon="file" title="1. ไฟล์ต้นแบบ" sub="รองรับ .xlsx" />
-        </div>
-        {template ? (
-          <div class="file-pill">
-            <Icon name="check" />
-            <div>
-              <strong>{template.original_name}</strong>
-              <div class="muted" style="font-size:.8rem">
-                อัปโหลด {template.uploaded_at.slice(0, 16)}
+    <div class="stack">
+      <div class="grid-2">
+        <section class="card">
+          <div class="card-head">
+            <CardTitle
+              icon="file"
+              title={
+                <>
+                  <span class="step-num">1</span> Template
+                </>
+              }
+              sub="Your company's .xlsx format"
+            />
+          </div>
+          {template ? (
+            <div class="file-pill">
+              <span class="icon-bubble">
+                <Icon name="check" />
+              </span>
+              <div style="min-width:0">
+                <strong style="word-break:break-all">{template.original_name}</strong>
+                <div class="muted" style="font-size:.78rem">
+                  Uploaded {template.uploaded_at.slice(0, 16)}
+                </div>
               </div>
             </div>
+          ) : (
+            <p class="muted" style="margin:0 0 14px">
+              No template uploaded yet.
+            </p>
+          )}
+          <form method="post" action="/timesheet/template" enctype="multipart/form-data" class="dropzone">
+            <input type="file" name="file" accept=".xlsx" required />
+            <button class="btn">
+              <Icon name="upload" /> {template ? 'Replace' : 'Upload'}
+            </button>
+          </form>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <CardTitle
+              icon="sparkle"
+              title={
+                <>
+                  <span class="step-num">2</span> Generate
+                </>
+              }
+              sub="The agent fills the month's work details into your template"
+            />
           </div>
-        ) : (
-          <p class="muted" style="margin-top:0">
-            ยังไม่มีไฟล์ต้นแบบ
-          </p>
-        )}
-        <form method="post" action="/timesheet/template" enctype="multipart/form-data" class="dropzone">
-          <input type="file" name="file" accept=".xlsx" required />
-          <button class="btn">
-            <Icon name="upload" /> {template ? 'เปลี่ยนต้นแบบ' : 'อัปโหลด'}
-          </button>
-        </form>
-      </section>
+          <form method="post" action="/timesheet/generate" class="row">
+            <input type="month" name="month" value={month} required />
+            <button class="btn primary" disabled={!template}>
+              <Icon name="sparkle" /> Generate timesheet
+            </button>
+          </form>
+          <p class="hint">This can take a few minutes. Feel free to keep using the app meanwhile.</p>
+        </section>
+      </div>
 
       <section class="card">
         <div class="card-head">
-          <CardTitle icon="sparkle" title="2. Gen timesheet" sub="agent กรอก work detail ทั้งเดือนลงต้นแบบ" />
+          <CardTitle icon="download" title="Generated timesheets" />
         </div>
-        <form method="post" action="/timesheet/generate" class="row">
-          <input type="month" name="month" value={month} required style="font-size:1.05rem" />
-          <button class="btn primary" disabled={!template}>
-            <Icon name="sparkle" /> Gen timesheet
-          </button>
-        </form>
-        <p class="hint">อาจใช้เวลาหลายนาที ระหว่างนี้ใช้หน้าอื่นได้ตามปกติ</p>
+        <TimesheetList rows={rows} />
       </section>
     </div>
-
-    <section class="card">
-      <div class="card-head">
-        <CardTitle icon="download" title="ที่สร้างไว้" />
-      </div>
-      <TimesheetList rows={rows} />
-    </section>
   </Layout>
 );

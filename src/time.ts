@@ -41,7 +41,7 @@ export function daysInMonth(month: string): number {
 const WEEKDAYS = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'];
 const WEEKDAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-export function weekdayOf(date: string, lang: 'th' | 'en' = 'th'): string {
+export function weekdayOf(date: string, lang: 'th' | 'en' = 'en'): string {
   const d = parseLocal(`${date} 00:00:00`).getDay();
   return (lang === 'th' ? WEEKDAYS : WEEKDAYS_EN)[d];
 }

@@ -66,7 +66,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
 }
 
 function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max)}\n… (ตัดเหลือ ${max} จาก ${s.length} ตัวอักษร)` : s;
+  return s.length > max ? `${s.slice(0, max)}\n… (truncated to ${max} of ${s.length} chars)` : s;
 }
 
 async function repoRoot(dir: string): Promise<string | null> {
@@ -80,12 +80,12 @@ async function repoRoot(dir: string): Promise<string | null> {
 /** หา repo ตามการตั้งค่า: single = folder นั้นคือ repo, multi = folder ย่อยชั้นแรกที่เป็น repo */
 export async function discoverRepos(settings: Settings): Promise<string[]> {
   const target = settings.targetPath.trim();
-  if (!target) throw new Error('ยังไม่ได้ตั้งค่า folder target (ไปที่หน้าตั้งค่า)');
-  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new Error(`ไม่พบ folder: ${target}`);
+  if (!target) throw new Error('No target folder set (see Settings)');
+  if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new Error(`Folder not found: ${target}`);
 
   if (settings.targetType === 'single') {
     const root = await repoRoot(target);
-    if (!root) throw new Error(`${target} ไม่ใช่ git repo (ถ้ามีหลาย repo อยู่ข้างใน ให้ตั้ง type เป็น multi)`);
+    if (!root) throw new Error(`${target} is not a git repository (if it contains several repos, choose Multiple repos)`);
     return [root];
   }
 
@@ -200,7 +200,7 @@ async function collectUncommitted(repo: string, date: string): Promise<RepoWork[
   }
   for (const f of untracked) {
     const preview = readTextPreview(path.join(repo, f.path));
-    diff += `\n--- ไฟล์ใหม่ (ยังไม่ add): ${f.path}\n${preview ?? '(ไฟล์ใหญ่หรือ binary: ไม่แสดงเนื้อหา)'}\n`;
+    diff += `\n--- new untracked file: ${f.path}\n${preview ?? '(large or binary file: content omitted)'}\n`;
   }
 
   return { files, diff: truncate(diff.trim(), MAX_UNCOMMITTED_DIFF) };
@@ -216,14 +216,14 @@ export async function collectDay(date: string, settings: Settings): Promise<GitD
     repos: [],
     warnings: [],
   };
-  if (!repos.length) data.warnings.push(`ไม่พบ git repo ใน ${settings.targetPath}`);
+  if (!repos.length) data.warnings.push(`No git repositories found in ${settings.targetPath}`);
 
   for (const repo of repos) {
     const name = path.basename(repo);
     const work: RepoWork = { repo, name, emails: [], commits: [], uncommitted: { files: [], diff: '' } };
     try {
       work.emails = await ownerEmails(repo, settings);
-      if (!work.emails.length) data.warnings.push(`${name}: ไม่รู้อีเมลของเจ้าของ จึงนับ commit ของทุกคน (ตั้งอีเมลได้ในหน้าตั้งค่า)`);
+      if (!work.emails.length) data.warnings.push(`${name}: your git email is unknown, so commits from everyone were counted (set it in Settings)`);
       work.commits = await collectCommits(repo, date, work.emails);
       work.uncommitted = await collectUncommitted(repo, date);
     } catch (e) {
@@ -244,18 +244,18 @@ export function formatGitData(data: GitDayData, maxChars = 80_000): string {
   for (const r of data.repos) {
     if (!r.commits.length && !r.uncommitted.files.length && !r.error) continue;
     out.push(`# Repo: ${r.name}`);
-    if (r.error) out.push(`(เก็บข้อมูลไม่สำเร็จ: ${r.error})`);
+    if (r.error) out.push(`(collection failed: ${r.error})`);
     if (r.commits.length) {
       out.push(`## Commits (${r.commits.length})`);
       for (const c of r.commits) {
         out.push(`### ${c.date.slice(11, 16)} ${c.hash.slice(0, 8)} ${c.subject}`);
         if (c.body) out.push(c.body);
-        out.push('Files:', c.stat, 'Diff:', c.diff || '(ไม่มี diff ที่เป็นข้อความ)');
+        out.push('Files:', c.stat, 'Diff:', c.diff || '(no text diff)');
       }
     }
     if (r.uncommitted.files.length) {
-      out.push(`## งานที่ยังไม่ commit (${r.uncommitted.files.length} ไฟล์)`);
-      out.push(...r.uncommitted.files.map((f) => `${f.status} ${f.path} (แก้ล่าสุด ${f.modifiedAt?.slice(11, 16) ?? '?'})`));
+      out.push(`## Uncommitted work (${r.uncommitted.files.length} files)`);
+      out.push(...r.uncommitted.files.map((f) => `${f.status} ${f.path} (last modified ${f.modifiedAt?.slice(11, 16) ?? '?'})`));
       if (r.uncommitted.diff) out.push('Diff:', r.uncommitted.diff);
     }
     out.push('');

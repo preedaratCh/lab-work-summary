@@ -52,7 +52,7 @@ export async function inspectTemplate(file: string): Promise<string> {
       });
       if (cells.length) lines.push(`  Row ${r}: ${cells.join(' | ')}`);
     }
-    if (ws.rowCount > MAX_INSPECT_ROWS) lines.push(`  … (แสดง ${MAX_INSPECT_ROWS} แถวแรก)`);
+    if (ws.rowCount > MAX_INSPECT_ROWS) lines.push(`  … (showing the first ${MAX_INSPECT_ROWS} rows)`);
   });
   return lines.join('\n');
 }
@@ -61,25 +61,24 @@ export async function inspectTemplate(file: string): Promise<string> {
 export async function validateXlsx(file: string): Promise<void> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(file);
-  if (!wb.worksheets.length) throw new Error('ไฟล์ไม่มี sheet');
+  if (!wb.worksheets.length) throw new Error('The file has no sheets');
 }
 
 function buildWorkLog(month: string, lang: string): string {
   const days = listDays(`${month}-01`, `${month}-31`).reverse();
-  if (!days.length) return '(ไม่มีบันทึกการทำงานในเดือนนี้)';
-  const weekdayLang = /ไทย|thai/i.test(lang) ? 'th' : 'en';
+  if (!days.length) return '(no work logged this month)';
   return days
     .map((d) => {
       const hours = hoursBetween(d.check_in_at, d.check_out_at);
       const head = [
-        `### ${d.work_date} (${weekdayOf(d.work_date, weekdayLang)})`,
+        `### ${d.work_date} (${weekdayOf(d.work_date)})`,
         d.check_in_at ? `check-in ${timeOf(d.check_in_at)}` : 'check-in -',
         d.check_out_at ? `check-out ${timeOf(d.check_out_at)}` : 'check-out -',
         hours !== null ? `hours ${hours}` : '',
       ]
         .filter(Boolean)
         .join(' · ');
-      return `${head}\n${d.summary?.trim() || '(ไม่มี work detail)'}`;
+      return `${head}\n${d.summary?.trim() || '(no work detail)'}`;
     })
     .join('\n\n');
 }
@@ -117,14 +116,14 @@ interface CellWrite {
 function parseCells(text: string): CellWrite[] {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start < 0 || end < start) throw new Error(`agent ไม่ได้ตอบเป็น JSON: ${text.slice(0, 300)}`);
+  if (start < 0 || end < start) throw new Error(`The agent didn't answer with JSON: ${text.slice(0, 300)}`);
   let parsed: { cells?: unknown };
   try {
     parsed = JSON.parse(text.slice(start, end + 1));
   } catch (e) {
-    throw new Error(`อ่าน JSON จาก agent ไม่ได้: ${(e as Error).message}`);
+    throw new Error(`Couldn't parse the agent's JSON: ${(e as Error).message}`);
   }
-  if (!Array.isArray(parsed.cells)) throw new Error('JSON จาก agent ไม่มี "cells"');
+  if (!Array.isArray(parsed.cells)) throw new Error('The agent\'s JSON has no "cells"');
   return parsed.cells as CellWrite[];
 }
 
@@ -142,7 +141,7 @@ function applyValue(cell: ExcelJS.Cell, v: unknown): void {
     cell.value = (h * 60 + m) / 1440; // Excel เก็บเวลาเป็นเศษส่วนของวัน
     if (!cell.numFmt) cell.numFmt = 'hh:mm';
   } else {
-    throw new Error(`ค่าของเซลล์ ${cell.address} ไม่ถูกรูปแบบ: ${JSON.stringify(v)}`);
+    throw new Error(`Invalid value for cell ${cell.address}: ${JSON.stringify(v)}`);
   }
 }
 
@@ -153,9 +152,9 @@ async function writeTimesheet(templateFile: string, outFile: string, writes: Cel
 
   for (const w of writes) {
     const ws = wb.getWorksheet(w.sheet);
-    if (!ws) throw new Error(`ไม่พบ sheet "${w.sheet}" ในต้นแบบ`);
+    if (!ws) throw new Error(`Sheet "${w.sheet}" not found in the template`);
     const addr = String(w.cell).toUpperCase();
-    if (!ADDRESS_RE.test(addr)) throw new Error(`ตำแหน่งเซลล์ไม่ถูกต้อง: ${w.cell}`);
+    if (!ADDRESS_RE.test(addr)) throw new Error(`Invalid cell address: ${w.cell}`);
     const cell = ws.getCell(addr);
     if (cell.formula) continue; // ไม่เขียนทับสูตรของต้นแบบ
 

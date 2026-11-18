@@ -33,12 +33,12 @@ export function runAgent(prompt: string, command: string, timeoutMs = DEFAULT_TI
 
     const timer = setTimeout(() => {
       killTree(child.pid);
-      reject(new Error(`agent ไม่ตอบภายใน ${timeoutMs / 1000} วินาที`));
+      reject(new Error(`The agent didn't respond within ${timeoutMs / 1000} seconds`));
     }, timeoutMs);
 
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(new Error(`เรียกคำสั่ง "${command}" ไม่ได้: ${e.message}`));
+      reject(new Error(`Couldn't run "${command}": ${e.message}`));
     });
 
     child.on('close', (code) => {
@@ -47,12 +47,12 @@ export function runAgent(prompt: string, command: string, timeoutMs = DEFAULT_TI
       try {
         parsed = JSON.parse(stdout);
       } catch {
-        const detail = (stderr || stdout).trim().slice(-800) || '(ไม่มีข้อความ)';
-        reject(new Error(`agent จบการทำงานด้วย code ${code}: ${detail}`));
+        const detail = (stderr || stdout).trim().slice(-800) || '(no output)';
+        reject(new Error(`The agent exited with code ${code}: ${detail}`));
         return;
       }
       if (parsed.is_error || parsed.subtype !== 'success') {
-        reject(new Error(`agent ตอบกลับเป็น error: ${String(parsed.result ?? parsed.subtype).slice(0, 800)}`));
+        reject(new Error(`The agent returned an error: ${String(parsed.result ?? parsed.subtype).slice(0, 800)}`));
         return;
       }
       resolve(String(parsed.result ?? ''));
