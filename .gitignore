@@ -1,0 +1,8 @@
+node_modules/
+
+# ข้อมูลจริงของเจ้าของ (DB, ไฟล์ต้นแบบ, timesheet ที่ gen แล้ว) ไม่ขึ้น git
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
