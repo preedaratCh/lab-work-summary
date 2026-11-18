@@ -672,7 +672,73 @@ function emptyDay(date: string): WorkDay {
 
 // ---------- settings ----------
 
-export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: string }; msg?: string }> = ({ s, test, msg }) => (
+type RepoResult = { repos?: string[]; error?: string };
+
+const repoName = (p: string) => p.split(/[\\/]/).pop() ?? p;
+
+/** รายการ repo ใน folder target ให้ติ๊กว่าจะ scan ตัวไหน (แสดงเฉพาะตอนเลือก multi) */
+const RepoPicker: FC<{ s: Settings; candidates: RepoResult }> = ({ s, candidates }) => {
+  const excluded = new Set(s.excludedRepos.map((n) => n.toLowerCase()));
+  const repos = candidates.repos ?? [];
+  const selected = repos.filter((r) => !excluded.has(repoName(r).toLowerCase())).length;
+  return (
+    <div class="field repo-picker">
+      <div class="picker-head">
+        <span class="field-label" style="margin:0">
+          Repositories to scan
+        </span>
+        {repos.length > 0 && (
+          <div class="row" style="gap:4px">
+            <span class="picker-count" data-picker-count="">
+              {selected} of {repos.length}
+            </span>
+            <button type="button" class="btn ghost sm" data-check-all="1">
+              All
+            </button>
+            <button type="button" class="btn ghost sm" data-check-all="0">
+              None
+            </button>
+          </div>
+        )}
+      </div>
+      <input type="hidden" name="pickerFor" value={s.targetPath} />
+      {!s.targetPath ? (
+        <div class="picker-empty">Enter a path and save to see the repositories inside it.</div>
+      ) : candidates.error ? (
+        <div class="alert error">
+          <Icon name="alert" /> <div>{candidates.error}</div>
+        </div>
+      ) : repos.length === 0 ? (
+        <div class="picker-empty">No git repositories found one level inside this folder.</div>
+      ) : (
+        <div class="picker-list">
+          {repos.map((r) => {
+            const name = repoName(r);
+            return (
+              <label class="picker-item">
+                <input type="hidden" name="repoShown" value={name} />
+                <input type="checkbox" name="includeRepo" value={name} checked={!excluded.has(name.toLowerCase())} />
+                <span class="switch" aria-hidden="true"></span>
+                <span class="picker-name">
+                  <Icon name="git" />
+                  <strong title={name}>{name}</strong>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <div class="hint">Turned-off repos are skipped when summarizing. New repos added to this folder are scanned automatically.</div>
+    </div>
+  );
+};
+
+export const SettingsPage: FC<{ s: Settings; candidates: RepoResult; test?: RepoResult; msg?: string }> = ({
+  s,
+  candidates,
+  test,
+  msg,
+}) => (
   <Layout title="Settings" msg={msg} active="settings">
     <div class="page-head">
       <div>
@@ -717,6 +783,7 @@ export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: 
             </label>
           </div>
         </div>
+        <RepoPicker s={s} candidates={candidates} />
         <label class="field">
           <span class="field-label">Your git email(s)</span>
           <input type="text" name="authorEmails" value={s.authorEmails.join(', ')} placeholder="me@work.com, me@gmail.com" />
@@ -754,7 +821,7 @@ export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: 
       <div class="row">
         <button class="btn primary">Save settings</button>
         <button class="btn" name="test" value="1">
-          <Icon name="refresh" /> Save & find repos
+          <Icon name="refresh" /> Save & check scan
         </button>
       </div>
     </form>
@@ -762,8 +829,8 @@ export const SettingsPage: FC<{ s: Settings; test?: { repos?: string[]; error?: 
     {test && (
       <section class="card" style="margin-top:20px">
         <div class="card-head">
-          <CardTitle icon="git" title="Repositories found" />
-          {test.repos && <span class={`badge ${test.repos.length ? 'ok' : 'warn'}`}>{test.repos.length} found</span>}
+          <CardTitle icon="git" title="Will be scanned" />
+          {test.repos && <span class={`badge ${test.repos.length ? 'ok' : 'warn'}`}>{test.repos.length} repos</span>}
         </div>
         {test.error && (
           <div class="alert error">

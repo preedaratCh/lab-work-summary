@@ -21,7 +21,7 @@ import {
   toLanguage,
   type Settings,
 } from './db';
-import { discoverRepos } from './git';
+import { discoverRepos, listChildRepos } from './git';
 import { startSummary } from './summary';
 import { DATE_RE, localDate, localDateTime, MONTH_RE, monthOf, TIME_RE } from './time';
 import { startTimesheet, validateXlsx } from './timesheet';
@@ -162,14 +162,45 @@ app.get('/settings', async (c) => {
       test = { error: (e as Error).message };
     }
   }
-  return page(c, <SettingsPage s={s} test={test} msg={c.req.query('msg')} />);
+  // repo ทั้งหมดใน folder target สำหรับให้เลือกว่าจะข้ามตัวไหน (โหมด multi)
+  let candidates: { repos?: string[]; error?: string } = {};
+  if (s.targetPath) {
+    try {
+      candidates = { repos: listChildRepos(s.targetPath) };
+    } catch (e) {
+      candidates = { error: (e as Error).message };
+    }
+  }
+  return page(c, <SettingsPage s={s} candidates={candidates} test={test} msg={c.req.query('msg')} />);
 });
 
+/** ค่าจากฟอร์มที่อาจส่งมาหลายตัวชื่อเดียวกัน → string[] */
+function formList(v: unknown): string[] {
+  return (Array.isArray(v) ? v : v === undefined ? [] : [v]).map(String);
+}
+
 app.post('/settings', async (c) => {
-  const body = await c.req.parseBody();
+  const body = await c.req.parseBody({ all: true });
+  const prev = getSettings();
+  const targetPath = String(body.targetPath ?? '').trim();
+
+  // รายการ repo ที่แสดงในฟอร์มมาจาก path เดิม ถ้าเปลี่ยน path ก็เริ่มนับใหม่ (scan ทุก repo)
+  let excludedRepos: string[] = [];
+  if (String(body.pickerFor ?? '') === targetPath && targetPath === prev.targetPath) {
+    const shown = formList(body.repoShown);
+    const included = new Set(formList(body.includeRepo));
+    const shownLower = new Set(shown.map((n) => n.toLowerCase()));
+    excludedRepos = [
+      ...shown.filter((n) => !included.has(n)),
+      // repo ที่เคยข้ามไว้แต่ตอนนี้ไม่อยู่ในรายการ (เช่นถูกย้ายออกชั่วคราว) ยังคงข้ามต่อ
+      ...prev.excludedRepos.filter((n) => !shownLower.has(n.toLowerCase())),
+    ];
+  }
+
   const s: Settings = {
-    targetPath: String(body.targetPath ?? '').trim(),
+    targetPath,
     targetType: body.targetType === 'single' ? 'single' : 'multi',
+    excludedRepos,
     authorEmails: String(body.authorEmails ?? '')
       .split(/[,\s]+/)
       .map((e) => e.trim())

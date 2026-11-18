@@ -65,6 +65,9 @@ Web project สำหรับใช้งานบนเครื่องต�
 
 - **เข้า-เลิกงานได้วันละ 1 รอบ**: 1 แถวต่อวัน (`work_date` unique) มี `check_in_at`, `check_out_at`
 - **folder target ตั้งได้ชุดเดียว**: path 1 ค่า + type (`single` / `multi`)
+- **เลือก repo ที่ไม่ต้อง scan (โหมด multi, 2026-11-18)**: หน้าตั้งค่า scan folder ย่อยแล้วแสดงเป็นสวิตช์ให้ปิดทีละ repo
+  - เก็บเป็น `excludedRepos` (ชื่อ folder, เทียบแบบไม่สนตัวพิมพ์) ไม่ใช่รายการที่เลือก → repo ใหม่ถูก scan อัตโนมัติ
+  - เปลี่ยน path ของ folder target = ล้างรายการที่ข้าม; สลับไป single แล้วกลับมา multi รายการเดิมยังอยู่
 
 ### UI (2026-11-18)
 

@@ -72,6 +72,11 @@ export function toLanguage(v: unknown): Language {
 export interface Settings {
   targetPath: string;
   targetType: TargetType;
+  /**
+   * ชื่อ folder ของ repo ที่ไม่ต้อง scan (ใช้เฉพาะ multi)
+   * เก็บเป็นรายการ "ที่ข้าม" ไม่ใช่ "ที่เลือก" เพื่อให้ repo ที่เพิ่มมาใหม่ถูก scan โดยอัตโนมัติ
+   */
+  excludedRepos: string[];
   /** อีเมล git ของเจ้าของ ว่าง = ใช้ git config user.email ของแต่ละ repo */
   authorEmails: string[];
   /** ภาษาที่ให้ agent เขียน work detail / timesheet */
@@ -83,6 +88,7 @@ export interface Settings {
 const DEFAULT_SETTINGS: Settings = {
   targetPath: '',
   targetType: 'multi',
+  excludedRepos: [],
   authorEmails: [],
   language: 'Thai',
   claudeCommand: 'claude',

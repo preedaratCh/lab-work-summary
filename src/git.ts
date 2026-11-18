@@ -77,11 +77,33 @@ async function repoRoot(dir: string): Promise<string | null> {
   }
 }
 
-/** หา repo ตามการตั้งค่า: single = folder นั้นคือ repo, multi = folder ย่อยชั้นแรกที่เป็น repo */
-export async function discoverRepos(settings: Settings): Promise<string[]> {
-  const target = settings.targetPath.trim();
+function assertFolder(target: string): void {
   if (!target) throw new Error('No target folder set (see Settings)');
   if (!fs.existsSync(target) || !fs.statSync(target).isDirectory()) throw new Error(`Folder not found: ${target}`);
+}
+
+/** repo ทั้งหมดใน folder ย่อยชั้นแรก (ยังไม่ตัดตัวที่ตั้งให้ข้าม) ใช้แสดงเป็นตัวเลือกในหน้าตั้งค่า */
+export function listChildRepos(targetPath: string): string[] {
+  const target = targetPath.trim();
+  assertFolder(target);
+  return fs
+    .readdirSync(target, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
+    .map((e) => path.join(target, e.name))
+    .filter((dir) => fs.existsSync(path.join(dir, '.git')))
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/** repo ที่ตั้งให้ข้ามหรือไม่ (เทียบชื่อ folder แบบไม่สนตัวพิมพ์ เพราะ Windows ไม่สน) */
+export function isExcluded(repo: string, settings: Settings): boolean {
+  const name = path.basename(repo).toLowerCase();
+  return settings.excludedRepos.some((x) => x.toLowerCase() === name);
+}
+
+/** หา repo ตามการตั้งค่า: single = folder นั้นคือ repo, multi = folder ย่อยชั้นแรกที่เป็น repo ยกเว้นตัวที่ตั้งให้ข้าม */
+export async function discoverRepos(settings: Settings): Promise<string[]> {
+  const target = settings.targetPath.trim();
+  assertFolder(target);
 
   if (settings.targetType === 'single') {
     const root = await repoRoot(target);
@@ -89,12 +111,7 @@ export async function discoverRepos(settings: Settings): Promise<string[]> {
     return [root];
   }
 
-  return fs
-    .readdirSync(target, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && !e.name.startsWith('.'))
-    .map((e) => path.join(target, e.name))
-    .filter((dir) => fs.existsSync(path.join(dir, '.git')))
-    .sort((a, b) => a.localeCompare(b));
+  return listChildRepos(target).filter((repo) => !isExcluded(repo, settings));
 }
 
 async function ownerEmails(repo: string, settings: Settings): Promise<string[]> {

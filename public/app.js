@@ -66,3 +66,21 @@
     }),
   );
 })();
+
+// ----- repo picker: All / None buttons and live "x of y" counter -----
+(() => {
+  const picker = document.querySelector('.repo-picker');
+  if (!picker) return;
+  const boxes = () => [...picker.querySelectorAll('input[name="includeRepo"]')];
+  const count = picker.querySelector('[data-picker-count]');
+  const update = () => {
+    if (count) count.textContent = `${boxes().filter((b) => b.checked).length} of ${boxes().length}`;
+  };
+  picker.querySelectorAll('[data-check-all]').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      boxes().forEach((b) => (b.checked = btn.dataset.checkAll === '1'));
+      update();
+    }),
+  );
+  picker.addEventListener('change', update);
+})();
