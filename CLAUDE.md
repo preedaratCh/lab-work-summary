@@ -25,17 +25,24 @@ Web project สำหรับใช้งานบนเครื่องต�
 
 ## การตัดสินใจ (Decisions)
 
-### Agent: ใช้ Claude Code CLI ในเครื่อง (2026-11-18)
+### Agent: สลับ Claude Code CLI / Cursor Agent CLI ได้ (2026-11-18)
 
-- เจ้าของใช้ Claude **Pro** ซึ่งไม่รวม API → backend เรียก agent ด้วยการรัน `claude -p "<prompt>"` (headless)
-  และอ่านผลจาก stdout (ใช้ `--output-format json` ถ้าต้องการผลแบบมีโครงสร้าง)
-- ใช้โควตาเดียวกับ Pro: ถ้าโควตาหมดหรือ CLI error ต้องไม่ทำให้ข้อมูลหาย → ระบบต้อง **กดสรุปใหม่ภายหลังได้**
-- แยกส่วนเรียก agent ไว้ใน module เดียว (adapter) เพื่อให้เปลี่ยนไปใช้ Claude API ได้ในอนาคตโดยแก้จุดเดียว
+- ตั้งค่าในหน้า Settings: `agentProvider` = `claude` | `cursor` (คำสั่งใช้ `claude` / `agent` ตาม provider อัตโนมัติ ไม่มีช่องพิมพ์เอง)
+- backend เรียก headless แล้วอ่านผลจาก stdout (`--output-format json`); ส่ง prompt ทาง stdin
+  - Claude: `claude -p --output-format json`
+  - Cursor: `agent -p --mode=ask --trust --output-format json` (ask = ขอแค่ข้อความ ไม่ให้แก้ไฟล์)
+- JSON ตอบกลับของทั้งสองตัวใช้ฟิลด์ `subtype` / `is_error` / `result` แบบเดียวกัน → parse จุดเดียวใน `agent.ts`
+- โควตาคนละบัญชี (Claude Pro vs Cursor); ถ้าโควตาหมดหรือ CLI error ต้องไม่ทำให้ข้อมูลหาย → กดสรุปใหม่ภายหลังได้
+- แยกส่วนเรียก agent ไว้ใน module เดียว (adapter) เพื่อให้เปลี่ยนไปใช้ API ได้ในอนาคตโดยแก้จุดเดียว
 - **แบ่งหน้าที่:**
   - ดึงข้อมูล git ด้วยโค้ดเอง (`git log` ตามช่วงเวลาของวันนั้น) ไม่ให้ agent ไปค้นเอง → เร็ว แน่นอน และเก็บรายการ commit ดิบลง DB ได้เสมอ
   - agent ทำเฉพาะงานที่ต้องใช้ภาษา: สรุป commit เป็น work detail และกรอก timesheet ตามไฟล์ต้นแบบ
-- เครื่องนี้ยังไม่มีคำสั่ง `claude` ใน PATH (ตัวในแอป desktop เรียกจาก terminal ไม่ได้)
-  → ต้องติดตั้ง Claude Code CLI แยก และ login ด้วยบัญชี Pro ครั้งแรก; ใส่ขั้นตอนไว้ใน README ตอน scaffold
+- 2026-11-18: ติดตั้ง Claude Code CLI แล้วด้วย `npm install -g @anthropic-ai/claude-code` (v2.1.327)
+  อยู่ที่ `%LOCALAPPDATA%\Author Software\nvm\.nodejs\claude.exe` (โฟลเดอร์ node ของ nvm ซึ่งอยู่ใน PATH)
+  - npm เตือนว่าไม่ได้รัน postinstall script ของแพ็กเกจ แต่ `claude --version` ใช้ได้ปกติ
+  - ถ้ายังไม่ login, `claude -p` จะตอบ `is_error: true` พร้อม `result: "Not logged in · Please run /login"`
+    (adapter แสดงเป็น "The agent returned an error: …" บนหน้าเว็บ)
+- Cursor Agent CLI ยังไม่ได้ติดตั้งบนเครื่องนี้ตอนเพิ่มตัวเลือก (คำสั่ง `agent` ยังไม่ได้อยู่ใน PATH)
 
 ### ไฟล์ต้นแบบ timesheet: xlsx (2026-11-18)
 
@@ -76,6 +83,12 @@ Web project สำหรับใช้งานบนเครื่องต�
     ค่าเริ่มต้น Thai; รายการอยู่ที่ `LANGUAGES` ใน `db.ts`
 - ข้อความ comment ในโค้ดยังเป็นภาษาไทยได้ตามปกติ
 - **Theme:** มีปุ่มสลับ Light / Dark / System ที่ header จำค่าไว้ใน localStorage ของเบราว์เซอร์ (ค่าเริ่มต้น = System)
+- **ปฏิทินหน้า Today ย้อนดูเดือนก่อนได้** (2026-11-18): ปุ่ม ‹ › และ "This month" → `/?month=YYYY-MM#month`
+  (ไปเกินเดือนปัจจุบันไม่ได้); เดือนอื่นแสดงทุกวันในรายการด้านขวา
+  - "Days worked" นับวันที่มีเวลาเข้างาน **หรือ** มี work detail (เพื่อรวมวันที่ backfill ซึ่งไม่มีเวลา)
+  - วันที่มี work detail แต่ไม่มีเวลา แสดงเป็นจุดสีในปฏิทิน (legend: "Work, no hours")
+- prompt สรุปงานกำหนดรูปแบบ `## <repo>` + bullet `- ` (สรุปที่ทำไปก่อนหน้านี้รูปแบบหัวข้อยังไม่เหมือนกันทุกวัน
+  หน้าเว็บจึงหยิบ bullet แรกมาทำ preview)
 - เจ้าของชอบแนวดีไซน์ glass + gradient + ปุ่มกลมใหญ่ และอยากให้สวยระดับ "ว้าว"
 
 ### Stack (2026-11-18, Claude เลือกตามที่เจ้าของให้แนะนำ)
@@ -87,7 +100,7 @@ Web project สำหรับใช้งานบนเครื่องต�
 - **UI:** HTML ฝั่ง server + htmx สำหรับปุ่มต่าง ๆ (ไม่ใช้ SPA/React เพราะมีไม่กี่หน้า)
 - **Database:** SQLite ผ่าน `node:sqlite` ที่มากับ Node (ไม่ต้อง build native module บน Windows)
 - **xlsx:** `exceljs` (อ่านต้นแบบและเขียนผลโดยรักษา format เดิม)
-- **git / agent:** เรียก `git` และ `claude -p` ผ่าน `child_process.execFile` (ไม่ผ่าน shell)
+- **git / agent:** เรียก `git` และ CLI ของ agent (`claude` หรือ `agent`) ผ่าน `child_process.spawn` (บน Windows ผ่าน shell)
 - **Gen timesheet:** โค้ดอ่านโครงสร้างต้นแบบ (sheet, header, ตำแหน่งเซลล์) → ส่งให้ agent พร้อม work detail ทั้งเดือน
   → agent ตอบเป็น JSON ว่าจะกรอกอะไรลงเซลล์ไหน → โค้ดเขียนลงสำเนาของต้นแบบด้วย exceljs
   (agent ไม่แก้ไฟล์ xlsx เอง เพื่อให้ format ไม่พัง)
@@ -97,6 +110,9 @@ Web project สำหรับใช้งานบนเครื่องต�
 - `npm run dev`: รัน dev server (restart เองเมื่อแก้โค้ด) ที่ http://127.0.0.1:3000
 - `npm start`: รันปกติ
 - `npm run typecheck`: ตรวจ TypeScript (TypeScript 7)
+- `npm run backfill -- [--dry-run] [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--force]`: สรุป work detail ย้อนหลังทีละวัน
+  [--use-saved] (`scripts/backfill.ts`; `--use-saved` = ใช้ข้อมูล git ที่เก็บไว้; ค่าเริ่มต้น = วันแรกของเดือนที่แล้ว ถึง เมื่อวาน; ข้ามวันที่สรุปแล้วและวันที่ไม่มีงาน;
+  หยุดเองถ้า agent ติดโควตา / login; ไม่ใส่เวลาเข้า-เลิกงาน) ใช้ `summarizeDay()` ใน `summary.ts` ซึ่งรอจนเสร็จ
 - env: `PORT` (ค่าเริ่มต้น 3000), `WORKINGLAB_DATA` (ค่าเริ่มต้น `./data`)
 - server bind แค่ `127.0.0.1` ตามข้อกำหนดรัน local เท่านั้น
 
@@ -110,7 +126,7 @@ Web project สำหรับใช้งานบนเครื่องต�
 - ฟอนต์ IBM Plex Sans Thai + Space Grotesk โหลดจาก Google Fonts (ถ้าออฟไลน์จะใช้ฟอนต์ระบบแทน)
 - `db.ts`: schema และ query ทั้งหมด (`node:sqlite`); ตั้งค่าเก็บเป็น JSON แถวเดียวในตาราง `settings`
 - `git.ts`: หา repo และเก็บข้อมูล git ของวันนั้น
-- `agent.ts`: adapter เรียก `claude -p --output-format json` ส่ง prompt ทาง stdin
+- `agent.ts`: adapter เรียก Claude Code หรือ Cursor Agent ตาม settings ส่ง prompt ทาง stdin
 - `summary.ts`: สรุป work detail รายวันแบบ background
 - `timesheet.ts`: อ่านโครงสร้างต้นแบบ, ให้ agent ตอบ JSON, เขียนลง xlsx
 - `time.ts`: ฟังก์ชันวันที่/เวลา (เวลาท้องถิ่น เก็บเป็นข้อความ `YYYY-MM-DD HH:MM:SS`)
@@ -127,7 +143,31 @@ Web project สำหรับใช้งานบนเครื่องต�
 - 2026-11-18: เริ่มโปรเจกต์, `git init` แล้ว (branch `master`), ตอบคำถามออกแบบครบ เลือก stack แล้ว
 - 2026-11-18: เขียนเวอร์ชันแรกครบทุกฟีเจอร์ ทดสอบด้วย repo ทดสอบ + agent จำลองผ่านแล้ว
   (เข้า-เลิกงาน, เก็บ git แบบ multi/single, สรุป, แก้ย้อนหลัง, อัปโหลดต้นแบบ, gen + ดาวน์โหลด timesheet, กรณี agent error)
-  **ยังไม่ได้ทดสอบกับ Claude Code CLI จริง** เพราะเครื่องยังไม่ได้ติดตั้ง `claude`
+  **ยังไม่ได้ทดสอบกับ Claude Code CLI จริง**
+- 2026-11-18: ติดตั้ง CLI และเจ้าของ login บัญชี Pro แล้ว **ทดสอบกับของจริงผ่าน**:
+  `claude -p` ตอบได้ และสรุป work detail ของวันจาก repo จริง 5 repo ใช้เวลาประมาณ 26 วินาที ผลอ่านรู้เรื่อง แบ่งตาม repo
+  และติดป้าย "(กำลังทำ)" ให้งานที่ยังไม่ commit
+  - ยังไม่ได้ทดสอบ gen timesheet กับ agent จริง (ยังไม่มีไฟล์ต้นแบบของเจ้าของ)
+- 2026-11-18: เพิ่ม script backfill เพื่อให้เจ้าของลอง gen timesheet ของเดือนตุลาคม
+  dry-run ช่วง 2026-10-01 → 2026-11-17: มีงาน 20 วัน (ตุลาคม 12 วัน), ไม่มีงาน 28 วัน
+  - รันจริงแล้วกับข้อมูลจริง: สรุปสำเร็จ 20/20 วัน ล้มเหลว 0, ใช้เวลา 5.1 นาที (วันละ 9–17 วินาที)
+  - ตามที่เจ้าของสั่ง ใส่เวลาให้วันที่มีงานทั้ง 20 วัน (2026-10-07 → 2026-11-17) เป็น 08:00–18:00 ผ่าน route `/days/:date/times`
+    และแก้เวลาเข้างานของ 2026-11-18 เป็น 08:00 (ยังไม่เลิกงาน); work detail ไม่ถูกแตะ
+  - เจ้าของเปลี่ยนภาษาเป็น English แล้วสั่งสรุปใหม่: รัน `--force --use-saved` ช่วง 2026-10-01 → 2026-11-18
+    สำเร็จ 21/21 วัน ใช้เวลา 3.4 นาที ทุกวันเป็นภาษาอังกฤษและใช้รูปแบบ `## <repo>` + bullet แล้ว เวลาเข้า-เลิกงานยังอยู่ครบ
+  - ขั้นต่อไปคือเจ้าของลอง gen timesheet เดือน 2026-10 ด้วยไฟล์ต้นแบบของตัวเอง
+- 2026-11-18: `agent.ts` บน Windows ส่งคำสั่งเป็นบรรทัดเดียวผ่าน shell (ไม่ส่ง args แยก) เพื่อไม่ให้ Node เตือน DEP0190
+- 2026-11-18: เพิ่มสลับ agent ใน Settings ระหว่าง Claude Code CLI กับ Cursor Agent CLI
+  (ค่าเริ่มต้นยังเป็น Claude; ยังไม่ได้ทดสอบ Cursor Agent CLI จริงเพราะยังไม่ได้ติดตั้ง `agent`)
+
+## งานที่จดไว้ทำทีหลัง (Backlog)
+
+- **ปุ่ม re-scan / สรุปใหม่ทั้งช่วง (เจ้าของขอ 2026-11-18, ยังไม่ต้องทำ):** ปุ่มบนหน้าเว็บสำหรับสรุป work detail ใหม่หลายวันพร้อมกัน
+  เช่นหลังเปลี่ยนภาษาในหน้าตั้งค่า หรือเปลี่ยน repo ที่ scan
+  - ตอนนี้ทำได้แค่จาก terminal: `npm run backfill -- --from … --to … --force --use-saved` (ใช้ข้อมูล git เดิม)
+    หรือไม่ใส่ `--use-saved` ถ้าต้องการ scan git ใหม่
+  - ข้อควรคิดตอนทำ: ต้องสรุปทีละวันตามลำดับ (ห้ามยิง `claude` พร้อมกันหลายวัน), แสดงความคืบหน้า, หยุดเมื่อติดโควตา,
+    เลือกได้ว่าใช้ข้อมูล git เดิมหรือ scan ใหม่, และอาจแนะนำตอนกดบันทึกหลังเปลี่ยนภาษา
 
 ## แนวทางการทำงาน
 
