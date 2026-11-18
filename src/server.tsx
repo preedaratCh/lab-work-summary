@@ -51,12 +51,20 @@ function validDate(c: Context): string | null {
   return DATE_RE.test(date) ? date : null;
 }
 
-app.get('/static/htmx.min.js', (c) =>
-  c.body(fs.readFileSync(path.join(ROOT, 'node_modules/htmx.org/dist/htmx.min.js')), 200, {
-    'content-type': 'text/javascript; charset=utf-8',
-    'cache-control': 'max-age=86400',
-  }),
-);
+const STATIC_FILES: Record<string, [string, string]> = {
+  'htmx.min.js': ['node_modules/htmx.org/dist/htmx.min.js', 'text/javascript'],
+  'app.css': ['public/app.css', 'text/css'],
+  'app.js': ['public/app.js', 'text/javascript'],
+};
+
+app.get('/static/:file', (c) => {
+  const entry = STATIC_FILES[c.req.param('file')];
+  if (!entry) return c.notFound();
+  return c.body(fs.readFileSync(path.join(ROOT, entry[0])), 200, {
+    'content-type': `${entry[1]}; charset=utf-8`,
+    'cache-control': 'no-cache',
+  });
+});
 
 // ---------- หน้าหลัก: เข้างาน / เลิกงาน ----------
 

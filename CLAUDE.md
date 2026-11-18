@@ -91,7 +91,11 @@ Web project สำหรับใช้งานบนเครื่องต�
 ## โครงสร้างโค้ด (`src/`)
 
 - `server.tsx`: route ทั้งหมดของ Hono
-- `views.tsx`: หน้าเว็บ (Hono JSX) + CSS; ใช้ htmx แค่ poll สถานะตอนกำลังสรุป / gen (ทุก 3 วินาที)
+- `views.tsx`: หน้าเว็บ (Hono JSX) + ไอคอน SVG inline; ใช้ htmx แค่ poll สถานะตอนกำลังสรุป / gen (ทุก 3 วินาที)
+- `../public/app.css`: ดีไซน์ทั้งหมด (glass card + พื้นหลัง aurora, รองรับ light/dark ตาม OS, responsive, ปิดแอนิเมชันเมื่อ prefers-reduced-motion)
+- `../public/app.js`: นาฬิกาสด, เวลาทำงานที่นับขึ้น, วงแหวนความคืบหน้ารอบปุ่ม (เป้า 8 ชม.)
+- ไฟล์ static เสิร์ฟผ่าน `/static/:file` แบบ whitelist ใน `server.tsx`
+- ฟอนต์ IBM Plex Sans Thai + Space Grotesk โหลดจาก Google Fonts (ถ้าออฟไลน์จะใช้ฟอนต์ระบบแทน)
 - `db.ts`: schema และ query ทั้งหมด (`node:sqlite`); ตั้งค่าเก็บเป็น JSON แถวเดียวในตาราง `settings`
 - `git.ts`: หา repo และเก็บข้อมูล git ของวันนั้น
 - `agent.ts`: adapter เรียก `claude -p --output-format json` ส่ง prompt ทาง stdin
