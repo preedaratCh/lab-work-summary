@@ -22,6 +22,11 @@ Web project สำหรับใช้งานบนเครื่องต�
    - type: `single` (folder นั้นเป็น repo เดียว) หรือ `multi` (folder ที่มีหลาย repo อยู่ข้างใน)
 4. **Template timesheet**: อัปโหลดไฟล์ต้นแบบ (format) เข้าระบบ
 5. **Gen timesheet (สิ้นเดือน)**: agent เอา work detail ของทั้งเดือน + ไฟล์ต้นแบบ มาสร้าง timesheet
+6. **วันลา (2026-11-18)**: บันทึกต่อวันในหน้า `/days/:date` — ประเภท + ชั่วโมง (ไม่บังคับ) + หมายเหตุ (ไม่บังคับ); ซ้อนกับเวลา/work detail ได้ (ลาครึ่งวัน / ลาชั่วโมง)
+   - ประเภท: sick / personal / vacation / holiday (`leave_type` ใน `work_days`)
+   - holiday ไม่ใส่ชั่วโมง → 8 ชม.; หมายเหตุใส่ชื่อวันหยุดได้
+   - ปฏิทินหน้าแรก: จุดสี Leave, รายการ **Thai public holidays this month** กด Apply ครั้งเดียว (package `date-holidays`, โมดูล `holidays.ts`)
+   - Gen timesheet: ส่ง `Leave: …` เป็นบรรทัดแยกจาก work detail ให้ agent กรอกตามต้นแบบ
 
 ## การตัดสินใจ (Decisions)
 
@@ -85,8 +90,11 @@ Web project สำหรับใช้งานบนเครื่องต�
 - **Theme:** มีปุ่มสลับ Light / Dark / System ที่ header จำค่าไว้ใน localStorage ของเบราว์เซอร์ (ค่าเริ่มต้น = System)
 - **ปฏิทินหน้า Today ย้อนดูเดือนก่อนได้** (2026-11-18): ปุ่ม ‹ › และ "This month" → `/?month=YYYY-MM#month`
   (ไปเกินเดือนปัจจุบันไม่ได้); เดือนอื่นแสดงทุกวันในรายการด้านขวา
-  - "Days worked" นับวันที่มีเวลาเข้างาน **หรือ** มี work detail (เพื่อรวมวันที่ backfill ซึ่งไม่มีเวลา)
-  - วันที่มี work detail แต่ไม่มีเวลา แสดงเป็นจุดสีในปฏิทิน (legend: "Work, no hours")
+  - "Days logged" นับวันที่มีเวลาเข้างาน **หรือ** มี work detail **หรือ** มีวันลา (เพื่อรวมวันที่ backfill ซึ่งไม่มีเวลา)
+  - วันที่มี work detail แต่ไม่มีเวลา แสดงเป็นจุดสีในปฏิทิน (legend: "Work, no hours"); วันที่มี leave แสดงจุดมุม (legend: "Leave")
+  - กดวันในอดีต/วันนี้ → หน้าวัน: การ์ด Leave + กรอก work detail เอง (ถ้ายังไม่มีสรุป)
+- **วันทำงานในสัปดาห์ตั้งได้** (2026-11-18): `workdays` ใน settings (0=Sun … 6=Sat, ค่าเริ่มต้น จันทร์–ศุกร์)
+  วันที่ไม่ใช่วันทำงานโทนลายแรเงาในปฏิทิน (legend: "Day off"); ถ้าวันนั้นมีชั่วโมงทำงานจริงยังแสดง heat ตามปกติ
 - prompt สรุปงานกำหนดรูปแบบ `## <repo>` + bullet `- ` (สรุปที่ทำไปก่อนหน้านี้รูปแบบหัวข้อยังไม่เหมือนกันทุกวัน
   หน้าเว็บจึงหยิบ bullet แรกมาทำ preview)
 - เจ้าของชอบแนวดีไซน์ glass + gradient + ปุ่มกลมใหญ่ และอยากให้สวยระดับ "ว้าว"
@@ -100,6 +108,7 @@ Web project สำหรับใช้งานบนเครื่องต�
 - **UI:** HTML ฝั่ง server + htmx สำหรับปุ่มต่าง ๆ (ไม่ใช้ SPA/React เพราะมีไม่กี่หน้า)
 - **Database:** SQLite ผ่าน `node:sqlite` ที่มากับ Node (ไม่ต้อง build native module บน Windows)
 - **xlsx:** `exceljs` (อ่านต้นแบบและเขียนผลโดยรักษา format เดิม)
+- **วันหยุดไทย:** `date-holidays` (public holidays, timezone `Asia/Bangkok`)
 - **git / agent:** เรียก `git` และ CLI ของ agent (`claude` หรือ `agent`) ผ่าน `child_process.spawn` (บน Windows ผ่าน shell)
 - **Gen timesheet:** โค้ดอ่านโครงสร้างต้นแบบ (sheet, header, ตำแหน่งเซลล์) → ส่งให้ agent พร้อม work detail ทั้งเดือน
   → agent ตอบเป็น JSON ว่าจะกรอกอะไรลงเซลล์ไหน → โค้ดเขียนลงสำเนาของต้นแบบด้วย exceljs
@@ -130,6 +139,7 @@ Web project สำหรับใช้งานบนเครื่องต�
 - `summary.ts`: สรุป work detail รายวันแบบ background
 - `timesheet.ts`: อ่านโครงสร้างต้นแบบ, ให้ agent ตอบ JSON, เขียนลง xlsx
 - `time.ts`: ฟังก์ชันวันที่/เวลา (เวลาท้องถิ่น เก็บเป็นข้อความ `YYYY-MM-DD HH:MM:SS`)
+- `holidays.ts`: รายการวันหยุดราชการไทยต่อเดือน / ชื่อวันหยุดของวันที่ (สำหรับ Apply และ prefill note)
 
 พฤติกรรมที่ควรรู้:
 
@@ -159,6 +169,8 @@ Web project สำหรับใช้งานบนเครื่องต�
 - 2026-11-18: `agent.ts` บน Windows ส่งคำสั่งเป็นบรรทัดเดียวผ่าน shell (ไม่ส่ง args แยก) เพื่อไม่ให้ Node เตือน DEP0190
 - 2026-11-18: เพิ่มสลับ agent ใน Settings ระหว่าง Claude Code CLI กับ Cursor Agent CLI
   (ค่าเริ่มต้นยังเป็น Claude; ยังไม่ได้ทดสอบ Cursor Agent CLI จริงเพราะยังไม่ได้ติดตั้ง `agent`)
+- 2026-11-18: เพิ่มตั้งค่า workdays (ค่าเริ่มต้น จันทร์–ศุกร์) และโทน "Day off" ในปฏิทินหน้าแรก
+- 2026-11-18: วันลา + วันหยุดราชการไทย (Apply จากปฏิทิน), ส่ง leave แยกใน work log ตอน gen timesheet
 
 ## งานที่จดไว้ทำทีหลัง (Backlog)
 

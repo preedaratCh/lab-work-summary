@@ -15,15 +15,20 @@ import {
   listDays,
   listTimesheets,
   saveSettings,
+  clearLeave,
+  setLeave,
   setSummaryText,
   setTimes,
   TEMPLATE_DIR,
   TIMESHEET_DIR,
   toAgentProvider,
   toLanguage,
+  toLeaveType,
+  toWorkdays,
   type Settings,
 } from './db';
 import { discoverRepos, listChildRepos } from './git';
+import { thaiHolidayName, thaiHolidaysInMonth } from './holidays';
 import { startSummary } from './summary';
 import { DATE_RE, localDate, localDateTime, MONTH_RE, monthOf, TIME_RE } from './time';
 import { startTimesheet, validateXlsx } from './timesheet';
@@ -76,6 +81,7 @@ app.get('/', (c) => {
   // ?month=YYYY-MM ดูเดือนอื่นในปฏิทิน (ไม่ให้เลยเดือนปัจจุบัน)
   const q = c.req.query('month') ?? '';
   const month = MONTH_RE.test(q) && q <= monthOf(today) ? q : monthOf(today);
+  const settings = getSettings();
   return page(
     c,
     <HomePage
@@ -83,7 +89,9 @@ app.get('/', (c) => {
       month={month}
       day={getDay(today)}
       days={listDays(`${month}-01`, `${month}-31`)}
-      settingsReady={!!getSettings().targetPath}
+      workdays={settings.workdays}
+      thaiHolidays={thaiHolidaysInMonth(month)}
+      settingsReady={!!settings.targetPath}
       msg={c.req.query('msg')}
     />,
   );
@@ -111,7 +119,10 @@ app.get('/day', (c) => {
 app.get('/days/:date', (c) => {
   const date = validDate(c);
   if (!date) return c.notFound();
-  return page(c, <DayPage date={date} day={getDay(date)} msg={c.req.query('msg')} />);
+  return page(
+    c,
+    <DayPage date={date} day={getDay(date)} holidayHint={thaiHolidayName(date)} msg={c.req.query('msg')} />,
+  );
 });
 
 app.get('/days/:date/summary-box', (c) => {
@@ -153,6 +164,40 @@ app.post('/days/:date/summarize', async (c) => {
   const body = await c.req.parseBody();
   const started = startSummary(date, body.recollect === '1');
   return back(c, `/days/${date}`, started ? undefined : 'A summary is already running');
+});
+
+app.post('/days/:date/leave', async (c) => {
+  const date = validDate(c);
+  if (!date) return c.notFound();
+  const body = await c.req.parseBody();
+  if (body.clear === '1') {
+    clearLeave(date);
+    return back(c, `/days/${date}`, 'Leave cleared');
+  }
+  const type = toLeaveType(body.leave_type);
+  if (!type) return back(c, `/days/${date}`, 'Choose a leave type');
+  const hoursRaw = String(body.leave_hours ?? '').trim();
+  let hours: number | null = null;
+  if (hoursRaw) {
+    const h = Number(hoursRaw);
+    if (!Number.isFinite(h) || h < 0 || h > 24) return back(c, `/days/${date}`, 'Leave hours must be between 0 and 24');
+    hours = h;
+  }
+  const note = String(body.leave_note ?? '').trim() || null;
+  setLeave(date, { type, hours, note });
+  return back(c, `/days/${date}`, 'Leave saved');
+});
+
+app.post('/holidays/apply', async (c) => {
+  const body = await c.req.parseBody();
+  const date = String(body.date ?? '');
+  if (!DATE_RE.test(date)) return back(c, '/', 'Invalid date');
+  if (getDay(date)?.leave_type === 'holiday') {
+    return back(c, `/?month=${monthOf(date)}#month`, 'That day is already marked as a public holiday');
+  }
+  const name = String(body.name ?? '').trim() || thaiHolidayName(date) || 'Public holiday';
+  setLeave(date, { type: 'holiday', hours: 8, note: name });
+  return back(c, `/?month=${monthOf(date)}#month`, 'Public holiday applied');
 });
 
 // ---------- ตั้งค่า ----------
@@ -211,6 +256,7 @@ app.post('/settings', async (c) => {
       .split(/[,\s]+/)
       .map((e) => e.trim())
       .filter(Boolean),
+    workdays: toWorkdays(formList(body.workday)),
     language: toLanguage(body.language),
     agentProvider,
     agentCommand: defaultAgentCommand(agentProvider),

@@ -55,6 +55,18 @@ const INTERRUPTED = 'Interrupted because the server stopped while it was running
 db.prepare(`UPDATE work_days SET summary_status = 'error', summary_error = ? WHERE summary_status = 'running'`).run(INTERRUPTED);
 db.prepare(`UPDATE timesheets SET status = 'error', error = ? WHERE status = 'running'`).run(INTERRUPTED);
 
+// migrate: วันลา (ซ้อนกับงานได้)
+for (const col of [
+  `ALTER TABLE work_days ADD COLUMN leave_type TEXT`,
+  `ALTER TABLE work_days ADD COLUMN leave_hours REAL`,
+  `ALTER TABLE work_days ADD COLUMN leave_note TEXT`,
+]) {
+  try {
+    db.exec(col);
+  } catch {
+  }
+}
+
 // ---------- settings ----------
 
 export type TargetType = 'single' | 'multi';
@@ -98,6 +110,34 @@ export function defaultAgentCommand(provider: AgentProvider): string {
   return AGENT_PROVIDER_META[provider].defaultCommand;
 }
 
+/** วันในสัปดาห์แบบ JS Date.getDay(): 0=Sun … 6=Sat */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export const WEEKDAYS: { value: Weekday; label: string; short: string }[] = [
+  { value: 0, label: 'Sunday', short: 'Sun' },
+  { value: 1, label: 'Monday', short: 'Mon' },
+  { value: 2, label: 'Tuesday', short: 'Tue' },
+  { value: 3, label: 'Wednesday', short: 'Wed' },
+  { value: 4, label: 'Thursday', short: 'Thu' },
+  { value: 5, label: 'Friday', short: 'Fri' },
+  { value: 6, label: 'Saturday', short: 'Sat' },
+];
+
+/** ค่าเริ่มต้น: จันทร์–ศุกร์ */
+export const DEFAULT_WORKDAYS: Weekday[] = [1, 2, 3, 4, 5];
+
+export function toWorkdays(v: unknown): Weekday[] {
+  const raw = Array.isArray(v) ? v : [];
+  const days = [
+    ...new Set(
+      raw
+        .map((n) => Number(n))
+        .filter((n): n is Weekday => Number.isInteger(n) && n >= 0 && n <= 6),
+    ),
+  ].sort((a, b) => a - b);
+  return days.length ? days : [...DEFAULT_WORKDAYS];
+}
+
 export interface Settings {
   targetPath: string;
   targetType: TargetType;
@@ -108,6 +148,8 @@ export interface Settings {
   excludedRepos: string[];
   /** อีเมล git ของเจ้าของ ว่าง = ใช้ git config user.email ของแต่ละ repo */
   authorEmails: string[];
+  /** วันทำงานในสัปดาห์ (0=Sun … 6=Sat) — ใช้โทนสีปฏิทินวันหยุด */
+  workdays: Weekday[];
   /** ภาษาที่ให้ agent เขียน work detail / timesheet */
   language: Language;
   /** เลือก CLI: Claude Code หรือ Cursor Agent */
@@ -121,6 +163,7 @@ const DEFAULT_SETTINGS: Settings = {
   targetType: 'multi',
   excludedRepos: [],
   authorEmails: [],
+  workdays: [...DEFAULT_WORKDAYS],
   language: 'Thai',
   agentProvider: 'claude',
   agentCommand: 'claude',
@@ -135,6 +178,7 @@ export function getSettings(): Settings {
     targetType: raw.targetType === 'single' ? 'single' : 'multi',
     excludedRepos: Array.isArray(raw.excludedRepos) ? raw.excludedRepos.map(String) : [],
     authorEmails: Array.isArray(raw.authorEmails) ? raw.authorEmails.map(String) : [],
+    workdays: toWorkdays(raw.workdays),
     language: toLanguage(raw.language),
     agentProvider,
     agentCommand: defaultAgentCommand(agentProvider),
@@ -151,6 +195,37 @@ export function saveSettings(s: Settings): void {
 
 export type SummaryStatus = 'none' | 'running' | 'done' | 'error';
 
+export const LEAVE_TYPES = ['sick', 'personal', 'vacation', 'holiday'] as const;
+export type LeaveType = (typeof LEAVE_TYPES)[number];
+
+export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
+  sick: 'Sick leave',
+  personal: 'Personal leave',
+  vacation: 'Vacation',
+  holiday: 'Public holiday',
+};
+
+/** ป้ายสั้นในปฏิทิน (legend) */
+export const LEAVE_TYPE_SHORT: Record<LeaveType, string> = {
+  sick: 'Sick',
+  personal: 'Personal',
+  vacation: 'Vacation',
+  holiday: 'Public holiday',
+};
+
+export function leaveCssClass(type: LeaveType | null | undefined): string {
+  return type ? `leave-${type}` : '';
+}
+
+export function toLeaveType(v: unknown): LeaveType | null {
+  const s = String(v ?? '').trim();
+  return (LEAVE_TYPES as readonly string[]).includes(s) ? (s as LeaveType) : null;
+}
+
+export function hasLeave(d: Pick<WorkDay, 'leave_type'>): boolean {
+  return !!d.leave_type;
+}
+
 export interface WorkDay {
   work_date: string;
   check_in_at: string | null;
@@ -159,6 +234,9 @@ export interface WorkDay {
   summary: string | null;
   summary_status: SummaryStatus;
   summary_error: string | null;
+  leave_type: LeaveType | null;
+  leave_hours: number | null;
+  leave_note: string | null;
   updated_at: string;
 }
 
@@ -172,15 +250,33 @@ function updateDay(date: string, sets: string, ...params: (string | null)[]): nu
   return Number(r.changes);
 }
 
+function normalizeDay(raw: WorkDay | undefined): WorkDay | undefined {
+  if (!raw) return undefined;
+  return {
+    ...raw,
+    leave_type: raw.leave_type ? toLeaveType(raw.leave_type) : null,
+    leave_hours: raw.leave_hours != null ? Number(raw.leave_hours) : null,
+    leave_note: raw.leave_note ?? null,
+  };
+}
+
 export function getDay(date: string): WorkDay | undefined {
-  return db.prepare(`SELECT * FROM work_days WHERE work_date = ?`).get(date) as WorkDay | undefined;
+  return normalizeDay(db.prepare(`SELECT * FROM work_days WHERE work_date = ?`).get(date) as WorkDay | undefined);
 }
 
 /** วันในช่วง [from, to] เรียงใหม่ไปเก่า */
 export function listDays(from: string, to: string): WorkDay[] {
-  return db
+  return (db
     .prepare(`SELECT * FROM work_days WHERE work_date BETWEEN ? AND ? ORDER BY work_date DESC`)
-    .all(from, to) as unknown as WorkDay[];
+    .all(from, to) as unknown as WorkDay[]).map((d) => normalizeDay(d)!);
+}
+
+/** บรรทัด leave สำหรับส่งให้ agent ตอน gen timesheet */
+export function formatLeaveLine(d: Pick<WorkDay, 'leave_type' | 'leave_hours' | 'leave_note'>): string | null {
+  if (!d.leave_type) return null;
+  const hrs = d.leave_hours ?? (d.leave_type === 'holiday' ? 8 : null);
+  const parts = [`Leave: ${d.leave_type}`, hrs != null ? `${hrs}h` : '', d.leave_note ?? ''].filter(Boolean);
+  return parts.join(' · ');
 }
 
 /** คืน false ถ้าวันนั้นเข้างานไปแล้ว */
@@ -225,6 +321,27 @@ export function finishSummary(date: string, summary: string): void {
 
 export function failSummary(date: string, error: string): void {
   updateDay(date, `summary_status = 'error', summary_error = ?`, error);
+}
+
+/** บันทึกวันลา — holiday ใช้ 8 ชม. ถ้าไม่ระบุชั่วโมง */
+export function setLeave(
+  date: string,
+  leave: { type: LeaveType; hours?: number | null; note?: string | null },
+): void {
+  let hours = leave.hours ?? null;
+  if (hours === null && leave.type === 'holiday') hours = 8;
+  const note = (leave.note ?? '').trim() || null;
+  updateDay(
+    date,
+    `leave_type = ?, leave_hours = ?, leave_note = ?`,
+    leave.type,
+    hours !== null ? String(hours) : null,
+    note,
+  );
+}
+
+export function clearLeave(date: string): void {
+  updateDay(date, `leave_type = NULL, leave_hours = NULL, leave_note = NULL`);
 }
 
 // ---------- templates ----------

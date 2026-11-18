@@ -8,6 +8,7 @@ import {
   createTimesheet,
   failTimesheet,
   finishTimesheet,
+  formatLeaveLine,
   getSettings,
   listDays,
   TEMPLATE_DIR,
@@ -64,8 +65,14 @@ export async function validateXlsx(file: string): Promise<void> {
   if (!wb.worksheets.length) throw new Error('The file has no sheets');
 }
 
-function buildWorkLog(month: string, lang: string): string {
-  const days = listDays(`${month}-01`, `${month}-31`).reverse();
+function dayLogged(d: ReturnType<typeof listDays>[number]): boolean {
+  return !!(d.check_in_at || d.check_out_at || d.summary?.trim() || d.leave_type);
+}
+
+function buildWorkLog(month: string, _lang: string): string {
+  const days = listDays(`${month}-01`, `${month}-31`)
+    .filter(dayLogged)
+    .reverse();
   if (!days.length) return '(no work logged this month)';
   return days
     .map((d) => {
@@ -78,7 +85,9 @@ function buildWorkLog(month: string, lang: string): string {
       ]
         .filter(Boolean)
         .join(' · ');
-      return `${head}\n${d.summary?.trim() || '(no work detail)'}`;
+      const leave = formatLeaveLine(d);
+      const work = d.summary?.trim() || (leave ? '(no work detail)' : '(no work detail)');
+      return leave ? `${head}\n${work}\n${leave}` : `${head}\n${work}`;
     })
     .join('\n\n');
 }
@@ -100,6 +109,8 @@ ${workLog}
   and columns such as date, check-in, check-out, hours and task description.
 - Keep the template's labels, styles and formulas. Do not overwrite formula cells.
 - Condense each day's work detail to fit the description cell (keep the important tasks).
+- Some days include a separate "Leave: …" line (sick/personal/vacation/holiday with hours and optional note). Fill leave into the template's leave/absence columns or notes — do not merge leave into the work description unless the template has only one text field.
+- Do not invent leave for days that have no Leave line in the log.
 - For days with no work log, follow what the template implies (usually leave blank).
 - If the template has fewer day rows than needed, continue in the rows right below.
 - Respond with ONLY a JSON object (no prose, no code fences) in this shape:

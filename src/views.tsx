@@ -2,12 +2,21 @@ import type { Child, FC } from 'hono/jsx';
 import {
   AGENT_PROVIDER_META,
   AGENT_PROVIDERS,
+  hasLeave,
   LANGUAGES,
+  leaveCssClass,
+  LEAVE_TYPE_LABELS,
+  LEAVE_TYPE_SHORT,
+  LEAVE_TYPES,
+  WEEKDAYS,
+  type LeaveType,
   type Settings,
   type TemplateRow,
   type TimesheetRow,
+  type Weekday,
   type WorkDay,
 } from './db';
+import type { ThaiHoliday } from './holidays';
 import type { GitDayData } from './git';
 import { daysInMonth, hoursBetween, parseLocal, shiftMonth, timeOf, weekdayOf } from './time';
 
@@ -303,14 +312,25 @@ const Timeline: FC<{ day?: WorkDay }> = ({ day }) => {
   );
 };
 
-export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: WorkDay[]; settingsReady: boolean; msg?: string }> = ({
-  today,
-  month,
-  day,
-  days,
-  settingsReady,
-  msg,
-}) => {
+function isDayLogged(d: WorkDay): boolean {
+  return !!(d.check_in_at || (d.summary && d.summary_status === 'done') || hasLeave(d));
+}
+
+function leaveHours(d: WorkDay): number | null {
+  if (!d.leave_type) return null;
+  return d.leave_hours ?? (d.leave_type === 'holiday' ? 8 : null);
+}
+
+export const HomePage: FC<{
+  today: string;
+  month: string;
+  day?: WorkDay;
+  days: WorkDay[];
+  workdays: Weekday[];
+  thaiHolidays: ThaiHoliday[];
+  settingsReady: boolean;
+  msg?: string;
+}> = ({ today, month, day, days, workdays, thaiHolidays, settingsReady, msg }) => {
   const now = new Date();
   const working = !!day?.check_in_at && !day.check_out_at;
   const done = !!day?.check_out_at;
@@ -318,7 +338,8 @@ export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: W
   const monthLabel = fmtDate(`${month}-01`, { month: 'long', year: 'numeric' });
 
   // วันทำงาน = มีเวลาเข้างาน หรือมี work detail (เช่นวันที่ backfill ย้อนหลังซึ่งไม่มีเวลา)
-  const worked = days.filter((d) => d.check_in_at || (d.summary && d.summary_status === 'done'));
+  const logged = days.filter(isDayLogged);
+  const worked = logged;
   const totalHours = worked.reduce((sum, d) => sum + (hoursBetween(d.check_in_at, d.check_out_at) ?? 0), 0);
   const fullDays = worked.filter((d) => d.check_out_at).length;
   const avg = fullDays ? totalHours / fullDays : 0;
@@ -452,7 +473,7 @@ export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: W
             <div class="stats">
               <div class="stat">
                 <div class="value grad-text">{worked.length}</div>
-                <div class="label">Days worked</div>
+                <div class="label">Days logged</div>
               </div>
               <div class="stat">
                 <div class="value">
@@ -469,7 +490,10 @@ export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: W
                 <div class="label">Avg per day</div>
               </div>
             </div>
-            <Calendar today={today} month={month} days={days} />
+            <Calendar today={today} month={month} days={days} workdays={workdays} />
+            {thaiHolidays.length > 0 && (
+              <ThaiHolidaysPanel month={month} holidays={thaiHolidays} days={days} today={today} />
+            )}
           </section>
 
           <section class="card">
@@ -480,9 +504,9 @@ export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: W
                 <button class="btn">Open</button>
               </form>
             </div>
-            {days.length ? (
+            {logged.length ? (
               <div class="days">
-                {(isCurrent ? days.slice(0, 7) : days).map((d) => (
+                {(isCurrent ? logged.slice(0, 7) : logged).map((d) => (
                   <DayRow d={d} />
                 ))}
               </div>
@@ -496,20 +520,33 @@ export const HomePage: FC<{ today: string; month: string; day?: WorkDay; days: W
   );
 };
 
-const Calendar: FC<{ today: string; month: string; days: WorkDay[] }> = ({ today, month, days }) => {
+const Calendar: FC<{ today: string; month: string; days: WorkDay[]; workdays: Weekday[] }> = ({
+  today,
+  month,
+  days,
+  workdays,
+}) => {
   const byDate = new Map(days.map((d) => [d.work_date, d]));
+  const workSet = new Set(workdays);
   const offset = parseLocal(`${month}-01 00:00:00`).getDay();
-  const cells: Child[] = ['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((w) => <div class="wd">{w}</div>);
+  const cells: Child[] = WEEKDAYS.map((w) => (
+    <div class={`wd ${workSet.has(w.value) ? '' : 'non-work'}`.trim()}>{w.short[0]}</div>
+  ));
   for (let i = 0; i < offset; i++) cells.push(<span></span>);
   for (let n = 1; n <= daysInMonth(month); n++) {
     const date = `${month}-${pad(n)}`;
+    const weekday = parseLocal(`${date} 00:00:00`).getDay() as Weekday;
+    const off = !workSet.has(weekday);
     const d = byDate.get(date);
     const h = d ? hoursBetween(d.check_in_at, d.check_out_at) : null;
     // มี work detail แต่ไม่มีเวลา (เช่น backfill) → แสดงจุดบอกว่ามีงาน
     const workOnly = !h && !!d?.summary && d.summary_status === 'done';
+    const onLeave = !!d?.leave_type;
     const cls = [
       heatLevel(h),
+      off ? 'non-work' : '',
       workOnly ? 'has-work' : '',
+      onLeave ? `has-leave ${leaveCssClass(d!.leave_type)}` : '',
       date === today ? 'is-today' : '',
       date > today ? 'future' : '',
       d?.summary_status === 'error' ? 'has-error' : '',
@@ -517,11 +554,23 @@ const Calendar: FC<{ today: string; month: string; days: WorkDay[] }> = ({ today
       .filter(Boolean)
       .join(' ');
     const label = fmtDate(date, { day: 'numeric', month: 'short' });
+    const leaveTitle = onLeave
+      ? ` · ${LEAVE_TYPE_LABELS[d!.leave_type as LeaveType]}${leaveHours(d!) != null ? ` ${leaveHours(d!)}h` : ''}`
+      : '';
+    const title = h
+      ? `${label} · ${h}h${leaveTitle}`
+      : workOnly
+        ? `${label} · work logged, no hours${leaveTitle}`
+        : onLeave
+          ? `${label}${leaveTitle}`
+          : off
+            ? `${label} · day off`
+            : label;
     cells.push(
       date > today ? (
         <span class={`cell ${cls}`}>{n}</span>
       ) : (
-        <a href={`/days/${date}`} class={cls} title={h ? `${label} · ${h}h` : workOnly ? `${label} · work logged, no hours` : label}>
+        <a href={`/days/${date}`} class={cls} title={title}>
           {n}
         </a>
       ),
@@ -531,14 +580,26 @@ const Calendar: FC<{ today: string; month: string; days: WorkDay[] }> = ({ today
     <>
       <div class="cal">{cells}</div>
       <div class="legend">
-        <span class="legend-work">
-          <i class="dot-work"></i> Work, no hours
+        <span class="legend-left">
+          <span class="legend-work">
+            <i class="dot-off"></i> Day off
+          </span>
+          <span class="legend-work">
+            <i class="dot-work"></i> Work, no hours
+          </span>
         </span>
         Less <i></i>
         <i class="l1"></i>
         <i class="l2"></i>
         <i class="l3"></i>
         <i class="l4"></i> More
+        <div class="legend-leave">
+          {LEAVE_TYPES.map((t) => (
+            <span class="legend-work">
+              <i class={`dot-leave-type dot-${t}`}></i> {LEAVE_TYPE_SHORT[t]}
+            </span>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -551,8 +612,42 @@ function previewLine(summary: string | null): string | undefined {
   return (bullet ?? lines.find((l) => l && !l.startsWith('#')))?.replace(/^[-*•]\s+/, '');
 }
 
+const ThaiHolidaysPanel: FC<{ month: string; holidays: ThaiHoliday[]; days: WorkDay[]; today: string }> = ({
+  holidays,
+  days,
+}) => {
+  const marked = new Set(days.filter((d) => d.leave_type === 'holiday').map((d) => d.work_date));
+  return (
+    <div class="thai-holidays">
+      <div class="thai-holidays-label">Thai public holidays this month</div>
+      <ul class="thai-holiday-list">
+        {holidays.map((h) => (
+          <li>
+            <span class="thai-holiday-meta">
+              <time dateTime={h.date}>{fmtDate(h.date, { day: 'numeric', month: 'short' })}</time>
+              <span class="thai-holiday-name">{h.name}</span>
+            </span>
+            {marked.has(h.date) ? (
+              <span class="badge holiday-applied sm">On calendar</span>
+            ) : (
+              <form method="post" action="/holidays/apply" class="row" style="gap:6px;margin:0">
+                <input type="hidden" name="date" value={h.date} />
+                <input type="hidden" name="name" value={h.name} />
+                <button type="submit" class="btn sm">
+                  Apply
+                </button>
+              </form>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+};
+
 const DayRow: FC<{ d: WorkDay }> = ({ d }) => {
   const h = hoursBetween(d.check_in_at, d.check_out_at);
+  const lh = leaveHours(d);
   return (
     <a class="day-row" href={`/days/${d.work_date}`}>
       <div class="day-date">
@@ -564,9 +659,22 @@ const DayRow: FC<{ d: WorkDay }> = ({ d }) => {
           <span>
             {timeOf(d.check_in_at) || '--:--'} → {timeOf(d.check_out_at) || '--:--'}
           </span>
+          {hasLeave(d) && (
+            <span class={`badge ${leaveCssClass(d.leave_type)} sm`} title={d.leave_note ?? undefined}>
+              {LEAVE_TYPE_LABELS[d.leave_type!]}
+              {lh != null ? ` · ${lh}h` : ''}
+            </span>
+          )}
           <StatusBadge status={d.summary_status} />
         </div>
-        <div class="day-preview">{previewLine(d.summary) ?? <span class="muted">No summary yet</span>}</div>
+        <div class="day-preview">
+          {previewLine(d.summary) ??
+            (hasLeave(d) ? (
+              <span class="muted">{d.leave_note || LEAVE_TYPE_LABELS[d.leave_type!]}</span>
+            ) : (
+              <span class="muted">No summary yet</span>
+            ))}
+        </div>
       </div>
       <div class="day-hours">
         {h !== null ? round1(h) : '–'}
@@ -578,7 +686,79 @@ const DayRow: FC<{ d: WorkDay }> = ({ d }) => {
 
 // ---------- day ----------
 
-export const DayPage: FC<{ date: string; day?: WorkDay; msg?: string }> = ({ date, day, msg }) => {
+const LeaveCard: FC<{ date: string; day?: WorkDay; holidayHint?: string }> = ({ date, day, holidayHint }) => {
+  const type = day?.leave_type ?? '';
+  const hoursVal = day?.leave_hours != null ? day.leave_hours : type === 'holiday' ? 8 : '';
+  const noteVal = day?.leave_note ?? (type === 'holiday' || !type ? (holidayHint ?? '') : '');
+  return (
+    <section class="card">
+      <div class="card-head">
+        <CardTitle
+          icon="calendar"
+          title="Leave"
+          sub="Can coexist with work hours (half-day, hourly leave)"
+        />
+        {day && hasLeave(day) && (
+          <form method="post" action={`/days/${date}/leave`}>
+            <input type="hidden" name="clear" value="1" />
+            <button type="submit" class="btn ghost sm">
+              Clear leave
+            </button>
+          </form>
+        )}
+      </div>
+      <form method="post" action={`/days/${date}/leave`} class="leave-form">
+        <label>
+          Type
+          <select name="leave_type" required>
+            <option value="" selected={!type}>
+              — Choose —
+            </option>
+            {LEAVE_TYPES.map((t) => (
+              <option value={t} selected={type === t}>
+                {LEAVE_TYPE_LABELS[t]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Hours
+          <input
+            type="number"
+            name="leave_hours"
+            min="0"
+            max="24"
+            step="0.5"
+            placeholder={type === 'holiday' ? '8 (default)' : 'Optional'}
+            defaultValue={hoursVal === '' ? undefined : hoursVal}
+          />
+        </label>
+        <label class="wide">
+          Note
+          <input type="text" name="leave_note" maxlength={200} placeholder="Optional" defaultValue={noteVal} />
+        </label>
+        <button type="submit" class="btn primary">
+          Save leave
+        </button>
+      </form>
+      <ProductionHint />
+    </section>
+  );
+};
+
+/** hint ใต้ฟอร์ม leave */
+const ProductionHint = () => (
+  <div class="hint" style="margin-top:12px">
+    Public holidays default to 8 hours when hours are left empty. Pick a Thai holiday from the home calendar for one-click apply.
+  </div>
+);
+
+export const DayPage: FC<{ date: string; day?: WorkDay; holidayHint?: string; msg?: string }> = ({
+  date,
+  day,
+  holidayHint,
+  msg,
+}) => {
   const git = day?.git_data ? (JSON.parse(day.git_data) as GitDayData) : null;
   const running = day?.summary_status === 'running';
   const h = hoursBetween(day?.check_in_at ?? null, day?.check_out_at ?? null);
@@ -672,6 +852,8 @@ export const DayPage: FC<{ date: string; day?: WorkDay; msg?: string }> = ({ dat
           </section>
         </div>
 
+        <LeaveCard date={date} day={day} holidayHint={holidayHint} />
+
         <section class="card">
           <div class="card-head">
             <CardTitle icon="sparkle" title="Work detail" sub="Used to fill your timesheet at the end of the month" />
@@ -692,15 +874,27 @@ export const DayPage: FC<{ date: string; day?: WorkDay; msg?: string }> = ({ dat
             </div>
           </div>
           <SummaryBox day={day ?? emptyDay(date)} />
-          <details style="margin-top:20px">
-            <summary>Edit work detail manually</summary>
-            <form method="post" action={`/days/${date}/summary`} style="margin-top:12px">
-              <textarea name="summary">{day?.summary ?? ''}</textarea>
-              <button class="btn" style="margin-top:10px">
-                Save work detail
-              </button>
-            </form>
-          </details>
+          {day?.summary ? (
+            <details style="margin-top:20px">
+              <summary>Edit work detail manually</summary>
+              <form method="post" action={`/days/${date}/summary`} style="margin-top:12px">
+                <textarea name="summary">{day.summary}</textarea>
+                <button class="btn" style="margin-top:10px">
+                  Save work detail
+                </button>
+              </form>
+            </details>
+          ) : (
+            <div class="manual-detail" style="margin-top:20px">
+              <div class="field-label">Enter work detail manually</div>
+              <form method="post" action={`/days/${date}/summary`}>
+                <textarea name="summary" placeholder="Describe what you did today…" rows={6}></textarea>
+                <button class="btn" style="margin-top:10px">
+                  Save work detail
+                </button>
+              </form>
+            </div>
+          )}
         </section>
       </div>
     </Layout>
@@ -716,6 +910,9 @@ function emptyDay(date: string): WorkDay {
     summary: null,
     summary_status: 'none',
     summary_error: null,
+    leave_type: null,
+    leave_hours: null,
+    leave_note: null,
     updated_at: '',
   };
 }
@@ -839,6 +1036,24 @@ export const SettingsPage: FC<{ s: Settings; candidates: RepoResult; test?: Repo
           <input type="text" name="authorEmails" value={s.authorEmails.join(', ')} placeholder="me@work.com, me@gmail.com" />
           <div class="hint">Used to tell which commits are yours. Separate several with commas. Leave empty to use each repo's git config user.email.</div>
         </label>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <CardTitle icon="calendar" title="Work week" sub="Days you normally work — off days are tinted on the calendar" />
+        </div>
+        <div class="field">
+          <span class="field-label">Workdays</span>
+          <div class="wd-picker">
+            {WEEKDAYS.map((w) => (
+              <label class="wd-chip">
+                <input type="checkbox" name="workday" value={String(w.value)} checked={s.workdays.includes(w.value)} />
+                <span>{w.short}</span>
+              </label>
+            ))}
+          </div>
+          <div class="hint">Default is Monday–Friday. Unchecking a day marks it as a day off on the home calendar.</div>
+        </div>
       </section>
 
       <section class="card">
