@@ -13,6 +13,7 @@ Write in: ${language}
 
 Below is everything the developer changed in git on that day: their commits (from all branches) and work not yet committed.
 Summarize WHAT was done (features, fixes, refactors, investigations), grouped by repo/project.
+- Format: for each repo, a line "## <repo name>" followed by "- " bullet points (no other headings or styling).
 - Use short bullet points, one task per bullet, written so a manager can understand.
 - Merge related commits into one task; don't list file names unless they explain the task.
 - Treat uncommitted work as work in progress.
@@ -45,6 +46,15 @@ async function run(date: string, recollect: boolean): Promise<void> {
   } catch (e) {
     failSummary(date, e instanceof Error ? e.message : String(e));
   }
+}
+
+/**
+ * สรุปงานของวันนั้นแล้วรอจนเสร็จ (ใช้ใน script เช่น backfill)
+ * ผลและ error ถูกบันทึกลง DB เสมอ ฟังก์ชันนี้ไม่ throw
+ */
+export async function summarizeDay(date: string, recollect: boolean): Promise<void> {
+  markSummaryRunning(date);
+  await run(date, recollect);
 }
 
 /**
