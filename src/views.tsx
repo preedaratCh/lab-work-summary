@@ -1,5 +1,13 @@
 import type { Child, FC } from 'hono/jsx';
-import { LANGUAGES, type Settings, type TemplateRow, type TimesheetRow, type WorkDay } from './db';
+import {
+  AGENT_PROVIDER_META,
+  AGENT_PROVIDERS,
+  LANGUAGES,
+  type Settings,
+  type TemplateRow,
+  type TimesheetRow,
+  type WorkDay,
+} from './db';
 import type { GitDayData } from './git';
 import { daysInMonth, hoursBetween, parseLocal, shiftMonth, timeOf, weekdayOf } from './time';
 
@@ -835,7 +843,26 @@ export const SettingsPage: FC<{ s: Settings; candidates: RepoResult; test?: Repo
 
       <section class="card">
         <div class="card-head">
-          <CardTitle icon="sparkle" title="Agent" sub="Claude Code CLI writes your work details and fills timesheets" />
+          <CardTitle icon="sparkle" title="Agent" sub="Writes your work details and fills timesheets" />
+        </div>
+        <div class="field">
+          <span class="field-label">CLI provider</span>
+          <div class="options">
+            {AGENT_PROVIDERS.map((p) => {
+              const meta = AGENT_PROVIDER_META[p];
+              return (
+                <label class="option">
+                  <input type="radio" name="agentProvider" value={p} checked={s.agentProvider === p} />
+                  <span class="icon-bubble lang-flag">{p === 'claude' ? 'CL' : 'CU'}</span>
+                  <span>
+                    <strong>{meta.label}</strong>
+                    <small>{meta.hint}</small>
+                  </span>
+                  <span class="check"></span>
+                </label>
+              );
+            })}
+          </div>
         </div>
         <div class="field">
           <span class="field-label">Language for work details & timesheets</span>
@@ -853,11 +880,6 @@ export const SettingsPage: FC<{ s: Settings; candidates: RepoResult; test?: Repo
             ))}
           </div>
         </div>
-        <label class="field">
-          <span class="field-label">Claude Code CLI command</span>
-          <input type="text" name="claudeCommand" value={s.claudeCommand} class="mono" />
-          <div class="hint">Usually just claude. If it can't be found, enter the full path to the claude executable.</div>
-        </label>
       </section>
 
       <div class="row">

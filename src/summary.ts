@@ -41,7 +41,7 @@ async function run(date: string, recollect: boolean): Promise<void> {
       return;
     }
 
-    const result = await runAgent(buildPrompt(date, data, settings.language), settings.claudeCommand);
+    const result = await runAgent(buildPrompt(date, data, settings.language), settings);
     finishSummary(date, result.trim());
   } catch (e) {
     failSummary(date, e instanceof Error ? e.message : String(e));

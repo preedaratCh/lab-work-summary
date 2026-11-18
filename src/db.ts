@@ -69,6 +69,35 @@ export function toLanguage(v: unknown): Language {
   return /ไทย|thai/i.test(s) ? 'Thai' : 'English'; // ค่าเก่าที่เคยพิมพ์เอง
 }
 
+/** CLI ที่ใช้สรุปงาน / gen timesheet */
+export const AGENT_PROVIDERS = ['claude', 'cursor'] as const;
+export type AgentProvider = (typeof AGENT_PROVIDERS)[number];
+
+export const AGENT_PROVIDER_META: Record<
+  AgentProvider,
+  { label: string; defaultCommand: string; hint: string }
+> = {
+  claude: {
+    label: 'Claude Code CLI',
+    defaultCommand: 'claude',
+    hint: 'Uses your Claude Pro quota via the claude command',
+  },
+  cursor: {
+    label: 'Cursor Agent CLI',
+    defaultCommand: 'agent',
+    hint: 'Uses your Cursor account via the agent command (install from cursor.com/install)',
+  },
+};
+
+export function toAgentProvider(v: unknown): AgentProvider {
+  const s = String(v ?? '');
+  return (AGENT_PROVIDERS as readonly string[]).includes(s) ? (s as AgentProvider) : 'claude';
+}
+
+export function defaultAgentCommand(provider: AgentProvider): string {
+  return AGENT_PROVIDER_META[provider].defaultCommand;
+}
+
 export interface Settings {
   targetPath: string;
   targetType: TargetType;
@@ -81,8 +110,10 @@ export interface Settings {
   authorEmails: string[];
   /** ภาษาที่ให้ agent เขียน work detail / timesheet */
   language: Language;
-  /** คำสั่งเรียก Claude Code CLI */
-  claudeCommand: string;
+  /** เลือก CLI: Claude Code หรือ Cursor Agent */
+  agentProvider: AgentProvider;
+  /** คำสั่งเรียก CLI — ตั้งจาก provider อัตโนมัติ ไม่ให้พิมพ์เองใน UI */
+  agentCommand: string;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -91,13 +122,23 @@ const DEFAULT_SETTINGS: Settings = {
   excludedRepos: [],
   authorEmails: [],
   language: 'Thai',
-  claudeCommand: 'claude',
+  agentProvider: 'claude',
+  agentCommand: 'claude',
 };
 
 export function getSettings(): Settings {
   const row = db.prepare(`SELECT value FROM settings WHERE key = 'app'`).get() as { value: string } | undefined;
-  const s: Settings = { ...DEFAULT_SETTINGS, ...(row ? (JSON.parse(row.value) as Partial<Settings>) : {}) };
-  return { ...s, language: toLanguage(s.language) };
+  const raw = row ? (JSON.parse(row.value) as Partial<Settings>) : {};
+  const agentProvider = toAgentProvider(raw.agentProvider);
+  return {
+    targetPath: String(raw.targetPath ?? DEFAULT_SETTINGS.targetPath),
+    targetType: raw.targetType === 'single' ? 'single' : 'multi',
+    excludedRepos: Array.isArray(raw.excludedRepos) ? raw.excludedRepos.map(String) : [],
+    authorEmails: Array.isArray(raw.authorEmails) ? raw.authorEmails.map(String) : [],
+    language: toLanguage(raw.language),
+    agentProvider,
+    agentCommand: defaultAgentCommand(agentProvider),
+  };
 }
 
 export function saveSettings(s: Settings): void {

@@ -174,7 +174,7 @@ async function run(id: number, month: string, template: TemplateRow): Promise<vo
     const templateFile = path.join(TEMPLATE_DIR, template.stored_name);
     const structure = await inspectTemplate(templateFile);
     const prompt = buildPrompt(month, structure, buildWorkLog(month, settings.language), settings.language);
-    const answer = await runAgent(prompt, settings.claudeCommand, 10 * 60_000);
+    const answer = await runAgent(prompt, settings, 10 * 60_000);
     const outName = `timesheet-${month}-${id}.xlsx`;
     await writeTimesheet(templateFile, path.join(TIMESHEET_DIR, outName), parseCells(answer));
     finishTimesheet(id, outName);

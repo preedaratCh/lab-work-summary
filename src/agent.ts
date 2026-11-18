@@ -1,6 +1,7 @@
-// Adapter เรียก agent: ตอนนี้ใช้ Claude Code CLI (`claude -p`) ซึ่งใช้โควตา Claude Pro
-// ถ้าวันหน้าเปลี่ยนไปใช้ Claude API ให้แก้เฉพาะไฟล์นี้
+// Adapter เรียก agent: เลือก Claude Code CLI หรือ Cursor Agent CLI ตาม settings
+// ถ้าวันหน้าเปลี่ยนไปใช้ API ให้แก้เฉพาะไฟล์นี้
 import { spawn } from 'node:child_process';
+import { defaultAgentCommand, type AgentProvider, type Settings } from './db';
 
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 
@@ -10,21 +11,34 @@ function killTree(pid: number | undefined): void {
   else process.kill(pid, 'SIGTERM');
 }
 
+/** flags สำหรับโหมด print/headless ของแต่ละ CLI */
+function printArgs(provider: AgentProvider): string[] {
+  if (provider === 'cursor') {
+    // ask = ตอบข้อความอย่างเดียว ไม่แก้ไฟล์; trust = ไม่ถาม workspace ใน headless
+    return ['-p', '--mode=ask', '--trust', '--output-format', 'json'];
+  }
+  return ['-p', '--output-format', 'json'];
+}
+
 /**
  * ส่ง prompt ให้ agent ทาง stdin แล้วคืนข้อความคำตอบ
  * (ส่งทาง stdin เพราะ prompt ยาวเกินขีดจำกัดความยาว command line ของ Windows ได้)
  */
-export function runAgent(prompt: string, command: string, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<string> {
+export function runAgent(
+  prompt: string,
+  settings: Pick<Settings, 'agentProvider'>,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<string> {
+  const command = defaultAgentCommand(settings.agentProvider);
+  const args = printArgs(settings.agentProvider);
   const isWin = process.platform === 'win32';
-  // บน Windows ต้องผ่าน shell เพื่อให้เรียก claude.cmd (ติดตั้งผ่าน npm) ได้; argument เป็นค่าคงที่ ไม่มีข้อมูลจากผู้ใช้
-  const cmd = isWin && /\s/.test(command) ? `"${command}"` : command;
+  // บน Windows ต้องผ่าน shell เพื่อให้เรียก .cmd/.exe จาก PATH ได้; argument เป็นค่าคงที่ ไม่มีข้อมูลจากผู้ใช้
+  // ผ่าน shell แล้วส่งเป็นบรรทัดคำสั่งเดียว (ไม่ส่ง args แยก) เพื่อไม่ให้ Node เตือน DEP0190
+  const quoted = /\s/.test(command) ? `"${command}"` : command;
 
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, ['-p', '--output-format', 'json'], {
-      shell: isWin,
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const opts = { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] as ('pipe')[] };
+    const child = isWin ? spawn(`${quoted} ${args.join(' ')}`, { ...opts, shell: true }) : spawn(command, args, opts);
 
     let stdout = '';
     let stderr = '';

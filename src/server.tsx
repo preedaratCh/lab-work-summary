@@ -7,6 +7,7 @@ import {
   addTemplate,
   checkIn,
   checkOut,
+  defaultAgentCommand,
   getDay,
   getSettings,
   getTimesheet,
@@ -18,6 +19,7 @@ import {
   setTimes,
   TEMPLATE_DIR,
   TIMESHEET_DIR,
+  toAgentProvider,
   toLanguage,
   type Settings,
 } from './db';
@@ -200,6 +202,7 @@ app.post('/settings', async (c) => {
     ];
   }
 
+  const agentProvider = toAgentProvider(body.agentProvider);
   const s: Settings = {
     targetPath,
     targetType: body.targetType === 'single' ? 'single' : 'multi',
@@ -209,7 +212,8 @@ app.post('/settings', async (c) => {
       .map((e) => e.trim())
       .filter(Boolean),
     language: toLanguage(body.language),
-    claudeCommand: String(body.claudeCommand ?? '').trim() || 'claude',
+    agentProvider,
+    agentCommand: defaultAgentCommand(agentProvider),
   };
   saveSettings(s);
   return back(c, body.test ? '/settings?test=1' : '/settings', 'Settings saved');
